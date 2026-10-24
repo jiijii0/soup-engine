@@ -1,0 +1,20 @@
+{
+  "name": "5DC.111",
+  "vendor": "magiclantern-5Dc",
+  "vendor_hint": "https://builds.magiclantern.fm/5DC.html",
+  "vendor_build": "2012 5D Classic Magic Lantern",
+  "stock_size": 221184,
+  "restart": "0x00980000",
+  "payload_off": "0x1000",
+  "payload_base": "0x009D0000",
+  "stub_style": "single",
+  "stub_addr": "0x00980820",
+  "stub_limit": "0x0098090C",
+  "gui_bl_site": "0x00989DB4",
+  "gui_handler": "0x0098A0F0",
+  "init_literal": "0x00980774",
+  "ml_init_task": "0x00980440",
+  "magic_tag": "gaonisoy",
+  "checksum": "none",
+  "card_copy": true
+}

@@ -1,61 +1,19 @@
 #!/usr/bin/env python3
 """
-Patch the soup engine into the working 2012 Magic Lantern build for the 5D
-Classic, following the pattern that is known to work on this body.
+Patch the soup engine into a Magic Lantern AUTOEXEC.BIN for the 5D Classic.
 
-An earlier attempt grew AUTOEXEC.BIN by 36 KB, added a second relocation
-loop to cstart, and chained a task into Magic Lantern's init. It left the
-camera with no display at all: nothing runs before ML has replaced Canon's
-GuiMainTask, so a fault anywhere in that chain takes the whole UI with it.
+Platform constants (vendor path, hole addresses, payload base, checksum)
+live in ml/platforms/<name>/patch.json. The stub sources sit beside that
+file. Shared payload sources stay in ml/payload/.
 
-This does none of that. The rules it follows, taken from the ROM-dump patch
-that did work (24 bytes, same file size):
+  python3 tools/patch-film.py --platform 5DC.111
 
-  * the file stays exactly 221,184 bytes -- nothing is appended, so whether
-    the bootloader reads past the original length never matters;
-  * cstart and the boot path are not touched at all;
-  * nothing of ours runs at boot. The payload is read off the card only when
-    the menu item is chosen;
-  * every patched pointer is safe before the payload exists. The stub's
-    `se_loaded` flag lives inside ML's image and is set only after the
-    payload's magic word has been checked, and until then the button hook
-    passes every event straight to ML. A missing or corrupt ML/SE.BIN costs
-    one menu item and nothing else.
-
-What changes, and nothing more:
-
-  1. dump_edmac (0x00980820..0x009808F0) is replaced by the loader and the
-     button hook. That function is dead in the shipped binary: a scan of
-     every branch and every literal in the relocated image finds nothing
-     pointing into it from outside. Its literal pool ends at 0x0098090C and
-     ML's live veneer table starts at 0x00980910, so the budget is 236 bytes.
-
-     That boundary is now known to be load-bearing rather than merely
-     plausible. The veneers immediately past it are on Magic Lantern's own
-     drawing path, which the Phase 1 work decompiled (docs/ML_DISPLAY.md
-     3.1, 7):
-
-         0x0098091C  AcquireRecursiveLock   `bx lr` -- 16 call sites
-         0x00980920  ReleaseRecursiveLock   `bx lr` -- 16 call sites
-         0x00980938  get_screen_layout      `mov r0,#0; bx lr`
-
-     menu_redraw_do calls all three. A stub that ran past 0x0098090C would
-     not corrupt some unused table; it would corrupt the function ML's menu
-     redraw calls on every pass.
-
-  2. my_gui_task's call to handle_common_events_startup (the `bl` at
-     0x00989DB4) is retargeted at the hook, which offers each button to the
-     payload and tail-calls the original handler for anything it declines.
-
-  3. The Debug menu's "Don't click me!" entry has its .priv pointed at the
-     loader. Its .select is already run_in_separate_task, so it is left
-     alone -- as is every other field, and every other entry. The entry's
-     name and help strings are overwritten in place, so no pointer moves and
-     no space is needed anywhere.
-
-The payload itself is a separate file, ML/SE.BIN on the card.
+This is the Classic path only. The 50D does not survive the GUI hook;
+build that body with tools/build-50d.py instead.
 """
 
+import argparse
+import json
 import os
 import re
 import struct
@@ -64,50 +22,19 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
+PAYDIR = os.path.join(ROOT, "ml", "payload")
+OUTDIR = os.path.join(ROOT, "ml", "build")
+CARD = os.path.join(os.path.dirname(ROOT), "card")
 
-STOCK   = os.path.join(ROOT, "vendor", "magiclantern-5Dc", "autoexec.bin")
-PAYDIR  = os.path.join(ROOT, "ml", "payload")
-OUTDIR  = os.path.join(ROOT, "ml", "build")
-
-STOCK_SIZE  = 221184
-RESTART     = 0x00980000
-PAYLOAD_OFF = 0x1000
-
-# --- where the stub goes -------------------------------------------------
-STUB_ADDR   = 0x00980820      # dump_edmac
-STUB_LIMIT  = 0x0098090C      # ML's veneer table starts at 0x00980910
-
-# --- the gui hook --------------------------------------------------------
-GUI_BL_SITE = 0x00989DB4      # bl handle_common_events_startup, in my_gui_task
-GUI_HANDLER = 0x0098A0F0
-
-# --- the boot chain ------------------------------------------------------
-# ML creates its init task with the entry read from this literal. Point it
-# at our boot stub and the engine starts at power-on; the stub chains ML's
-# own init afterwards so the camera still comes up normally.
-INIT_LITERAL = 0x00980774
-ML_INIT_TASK = 0x00980440
-
-# Magic Lantern's menu is not touched at all any more.
-#
-# There used to be four more sites here: a Debug entry's .priv rewritten to
-# the loader, its name and help text replaced in place, and a display
-# callback written at runtime into every entry of every tab. All of that
-# existed so the soup engine could be reached from, and drawn inside, ML's
-# menu. It is reached at boot now and draws straight onto the panel, so
-# three edits do what seven did and ML's menu is left exactly as shipped.
+# Shared across platforms: which entry stubs may switch stacks.
+STACK_OWNERS = {"se_boot_watch": "__wstack_top",
+                "se_boot_screen": "__mstack_top"}
+HEADER_SLOTS = {0x04: "se_boot_start", 0x44: "se_boot_key"}
 
 
 def die(msg):
     sys.stderr.write("patch-film: %s\n" % msg)
     raise SystemExit(1)
-
-
-def va2off(va):
-    off = va - RESTART + PAYLOAD_OFF
-    if not (PAYLOAD_OFF <= off < 0x35000):
-        die("address 0x%08X is outside the relocated image" % va)
-    return off
 
 
 def u32(b, o):
@@ -118,6 +45,39 @@ def put32(b, o, v):
     struct.pack_into("<I", b, o, v & 0xFFFFFFFF)
 
 
+def parse_int(v):
+    if isinstance(v, int):
+        return v
+    return int(v, 0)
+
+
+def load_platform(name):
+    platdir = os.path.join(ROOT, "ml", "platforms", name)
+    path = os.path.join(platdir, "patch.json")
+    if not os.path.isfile(path):
+        die("no platform config at %s" % path)
+    cfg = json.load(open(path, "r", encoding="utf-8"))
+    cfg["_dir"] = platdir
+    for key in ("stock_size", "restart", "payload_off", "payload_base",
+                "gui_bl_site", "gui_handler", "init_literal", "ml_init_task"):
+        if key in cfg:
+            cfg[key] = parse_int(cfg[key])
+    for key in ("loader_addr", "loader_limit", "hook_addr", "hook_limit",
+                "stub_addr", "stub_limit",
+                "bss_end_literal", "bss_end_old", "bss_end_new",
+                "reserved_literal", "reserved_old", "reserved_new"):
+        if key in cfg:
+            cfg[key] = parse_int(cfg[key])
+    return cfg
+
+
+def va2off(cfg, va):
+    off = va - cfg["restart"] + cfg["payload_off"]
+    if not (cfg["payload_off"] <= off < cfg["stock_size"]):
+        die("address 0x%08X is outside the relocated image" % va)
+    return off
+
+
 def bl(frm, to):
     """Encode an ARM bl from `frm` to `to`."""
     delta = (to - frm - 8) >> 2
@@ -126,53 +86,60 @@ def bl(frm, to):
     return 0xEB000000 | (delta & 0x00FFFFFF)
 
 
-def build_stub():
-    """Assemble mlstub.S at its final address and return (bytes, symbols)."""
-    o = os.path.join(PAYDIR, "mlstub.o")
-    e = os.path.join(PAYDIR, "mlstub.elf")
-    b = os.path.join(PAYDIR, "mlstub.bin")
-    subprocess.run(["arm-none-eabi-as", "-mcpu=arm946e-s", "-o", o,
-                    os.path.join(PAYDIR, "mlstub.S")], check=True)
-    subprocess.run(["arm-none-eabi-ld", "-Ttext=%#x" % STUB_ADDR,
-                    "-e", "se_loader", "-o", e, o], check=True)
-    subprocess.run(["arm-none-eabi-objcopy", "-O", "binary", "-j", ".text",
-                    e, b], check=True)
-    nm = subprocess.run(["arm-none-eabi-nm", e],
+def nm_syms(elf):
+    nm = subprocess.run(["arm-none-eabi-nm", elf],
                         capture_output=True, text=True, check=True).stdout
     syms = {}
     for line in nm.splitlines():
         f = line.split()
-        if len(f) == 3:
-            syms[f[2]] = int(f[0], 16)
-    return bytearray(open(b, "rb").read()), syms
+        if len(f) == 3 and not f[2].startswith("*"):
+            try:
+                syms[f[2]] = int(f[0], 16)
+            except ValueError:
+                pass
+    return syms
 
 
-# --- the payload's own header ---------------------------------------------
-#
-# The payload tells Magic Lantern where to call it by writing a word from its
-# own header table into a menu entry at runtime, and the word it writes is a
-# constant in cam.h (SE_PAY_DISPLAY) while the table itself is laid out in
-# start.S. Those two have to agree, and nothing else would notice if they
-# stopped: the display slot would hold a plausible address in the middle of
-# the payload's code, ML would branch into it, and the camera would need its
-# battery pulled to find out.
-#
-# So check it here. Every slot in the table that is reached from outside must
-# be an ARM `b` to somewhere inside the payload.
-PAYLOAD_BASE  = 0x009D0000
-# The slots something outside the payload branches to.
-#
-# +0x04 is the one that matters: mlstub's loader ends with `add r0, r0, #4 ;
-# blx r0`, so that word IS the entry point. It was zeroed once, on the
-# grounds that it "was the menu select target", and the camera came up with
-# Err and no working buttons because the init task ran three nops and then
-# executed a string pointer. This check existed and was deleted in the same
-# commit. It is back, and it is the reason this list is not trimmed to
-# whatever happens to look used.
-HEADER_SLOTS  = {0x04: "se_boot_start", 0x44: "se_boot_key"}
+def build_stub_split(cfg):
+    """Assemble mlstub.S with a two-section linker script (50D style)."""
+    plat = cfg["_dir"]
+    o = os.path.join(PAYDIR, "mlstub.o")
+    e = os.path.join(PAYDIR, "mlstub.elf")
+    loader = os.path.join(PAYDIR, "mlstub-loader.bin")
+    hook = os.path.join(PAYDIR, "mlstub-hook.bin")
+    ld = os.path.join(plat, "mlstub.ld")
+    src = os.path.join(plat, "mlstub.S")
+    if not os.path.isfile(ld):
+        die("split stub needs %s" % ld)
+    subprocess.run(["arm-none-eabi-as", "-mcpu=arm946e-s", "-o", o, src],
+                   check=True)
+    subprocess.run(["arm-none-eabi-ld", "-T", ld, "-o", e, o], check=True)
+    subprocess.run(["arm-none-eabi-objcopy", "-O", "binary", "-j", ".loader",
+                    e, loader], check=True)
+    subprocess.run(["arm-none-eabi-objcopy", "-O", "binary", "-j", ".hook",
+                    e, hook], check=True)
+    return (bytearray(open(loader, "rb").read()),
+            bytearray(open(hook, "rb").read()),
+            nm_syms(e))
 
 
-def branch_target(img, off):
+def build_stub_single(cfg):
+    """Assemble mlstub.S as one contiguous blob at stub_addr (5D Classic)."""
+    plat = cfg["_dir"]
+    o = os.path.join(PAYDIR, "mlstub.o")
+    e = os.path.join(PAYDIR, "mlstub.elf")
+    b = os.path.join(PAYDIR, "mlstub.bin")
+    src = os.path.join(plat, "mlstub.S")
+    subprocess.run(["arm-none-eabi-as", "-mcpu=arm946e-s", "-o", o, src],
+                   check=True)
+    subprocess.run(["arm-none-eabi-ld", "-Ttext=%#x" % cfg["stub_addr"],
+                    "-e", "se_loader", "-o", e, o], check=True)
+    subprocess.run(["arm-none-eabi-objcopy", "-O", "binary", "-j", ".text",
+                    e, b], check=True)
+    return bytearray(open(b, "rb").read()), nm_syms(e)
+
+
+def branch_target(cfg, img, off):
     """Where the ARM `b` at header offset `off` goes, or None."""
     w = u32(img, off)
     if (w & 0x0F000000) != 0x0A000000:
@@ -180,32 +147,19 @@ def branch_target(img, off):
     delta = w & 0x00FFFFFF
     if delta & 0x00800000:
         delta -= 0x01000000
-    return PAYLOAD_BASE + off + 8 + delta * 4
+    return cfg["payload_base"] + off + 8 + delta * 4
 
 
-def check_header(pay):
+def check_header(cfg, pay):
+    base = cfg["payload_base"]
     for off, name in sorted(HEADER_SLOTS.items()):
-        t = branch_target(pay, off)
+        t = branch_target(cfg, pay, off)
         if t is None:
             die("the payload's header slot +0x%02X (%s) holds 0x%08X, which "
                 "is not a branch" % (off, name, u32(pay, off)))
-        if not (PAYLOAD_BASE <= t < PAYLOAD_BASE + len(pay)):
+        if not (base <= t < base + len(pay)):
             die("the payload's header slot +0x%02X (%s) branches to 0x%08X, "
                 "outside the payload" % (off, name, t))
-
-
-# Which entry stubs are allowed to switch to one of the payload's own
-# stacks, and which stack each must use.
-#
-# The rule is "task bodies only, one stack each", and it is checked rather
-# than remembered because forgetting it does not fail loudly. se_boot_start
-# once switched to __mstack_top and then created the screen task, which
-# runs on __mstack_top: the new task's pushes landed on the return address
-# the old context was about to use, the init task jumped into nothing, and
-# the camera shot photographs while answering no button at all. Nothing in
-# the build or the simulator noticed.
-STACK_OWNERS = {"se_boot_watch": "__wstack_top",
-                "se_boot_screen": "__mstack_top"}
 
 
 def check_stacks():
@@ -231,90 +185,210 @@ def check_stacks():
         die("two entry stubs share a stack: %r" % seen)
 
 
-def main():
-    if not os.path.exists(STOCK):
-        die("Magic Lantern's autoexec.bin is missing.\n\n"
-            "  Expected it at:\n    %s\n\n"
-            "  It is not shipped here. What this tool produces IS that\n"
-            "  binary with three instructions changed, so you need Magic\n"
-            "  Lantern's own 5D Classic build to start from. Download it\n"
-            "  from https://magiclantern.fm and put its autoexec.bin at the\n"
-            "  path above.\n\n"
-            "  You do not need this to USE the soup engine -- card/SE.BIN\n"
-            "  and card/AUTOEXEC.BIN are already built. See BUILDING.md."
-            % STOCK)
-    img = bytearray(open(STOCK, "rb").read())
-    if len(img) != STOCK_SIZE:
-        die("stock AUTOEXEC.BIN is %d bytes, expected %d" % (len(img), STOCK_SIZE))
-    if bytes(img[4:12]) != b"gaonisoy":
-        die("no 'gaonisoy' marker: this is not a Magic Lantern autoexec")
+def fix_checksum_xor_bx_r3(img):
+    """The boot stub XORs every word and resets unless the result is zero.
+    The last word is the adjustment, same as build_tools/xor_chk.c."""
+    if u32(img, len(img) - 8) != 0xE12FFF13:
+        die("footer magic is not BX R3; refusing to checksum this autoexec")
+    total = 0
+    for off in range(0, len(img), 4):
+        total ^= u32(img, off)
+    put32(img, len(img) - 4, u32(img, len(img) - 4) ^ total)
+    total = 0
+    for off in range(0, len(img), 4):
+        total ^= u32(img, off)
+    if total != 0:
+        die("checksum did not close")
 
-    check_stacks()
 
-    stub, syms = build_stub()
+def hole_is_zero(cfg, img, addr, n):
+    off = va2off(cfg, addr)
+    return all(b == 0 for b in img[off:off + n])
+
+
+def verify_magic(cfg, img):
+    tag = cfg.get("magic_tag", "")
+    if tag == "gaonisoy":
+        if bytes(img[4:12]) != b"gaonisoy":
+            die("no 'gaonisoy' marker: this is not a Magic Lantern autoexec")
+    elif tag:
+        head = bytes(img[:256])
+        if b"Magic Lantern" not in head or tag.encode("ascii") not in head:
+            die("this is not the Magic Lantern %s autoexec this patch knows"
+                % cfg["name"])
+
+
+def apply_split(cfg, img):
+    loader, hook, syms = build_stub_split(cfg)
+    for want in ("se_loader", "se_hook", "se_boot", "se_loaded", "se_loader_end"):
+        if want not in syms:
+            die("stub is missing the symbol %s" % want)
+    if syms["se_boot"] != cfg["loader_addr"]:
+        die("loader linked at 0x%08X, expected 0x%08X"
+            % (syms["se_boot"], cfg["loader_addr"]))
+    if syms["se_hook"] != cfg["hook_addr"]:
+        die("hook linked at 0x%08X, expected 0x%08X"
+            % (syms["se_hook"], cfg["hook_addr"]))
+    if syms["se_loader_end"] > cfg["loader_limit"]:
+        die("loader reaches 0x%08X, past the hole at 0x%08X"
+            % (syms["se_loader_end"], cfg["loader_limit"]))
+    if cfg["hook_addr"] + len(hook) > cfg["hook_limit"]:
+        die("hook is %d bytes and would pass 0x%08X"
+            % (len(hook), cfg["hook_limit"]))
+
+    if not hole_is_zero(cfg, img, cfg["loader_addr"], len(loader)):
+        die("the loader hole at 0x%08X is not empty" % cfg["loader_addr"])
+    if not hole_is_zero(cfg, img, cfg["hook_addr"], len(hook)):
+        die("the hook hole at 0x%08X is not empty" % cfg["hook_addr"])
+
+    have = u32(img, va2off(cfg, cfg["gui_bl_site"]))
+    want = bl(cfg["gui_bl_site"], cfg["gui_handler"])
+    if have != want:
+        die("the instruction at 0x%08X is 0x%08X, expected 0x%08X "
+            "(bl handle_common_events_startup)"
+            % (cfg["gui_bl_site"], have, want))
+
+    have_init = u32(img, va2off(cfg, cfg["init_literal"]))
+    if have_init != cfg["ml_init_task"]:
+        die("the init-task literal at 0x%08X is 0x%08X, expected 0x%08X"
+            % (cfg["init_literal"], have_init, cfg["ml_init_task"]))
+    if u32(img, va2off(cfg, cfg["bss_end_literal"])) != cfg["bss_end_old"]:
+        die("bss-end literal is not 0x%08X" % cfg["bss_end_old"])
+    if u32(img, va2off(cfg, cfg["reserved_literal"])) != cfg["reserved_old"]:
+        die("reserved-size literal is not 0x%08X" % cfg["reserved_old"])
+
+    img[va2off(cfg, cfg["loader_addr"]):
+        va2off(cfg, cfg["loader_addr"]) + len(loader)] = loader
+    img[va2off(cfg, cfg["hook_addr"]):
+        va2off(cfg, cfg["hook_addr"]) + len(hook)] = hook
+    put32(img, va2off(cfg, cfg["gui_bl_site"]),
+          bl(cfg["gui_bl_site"], syms["se_hook"]))
+    put32(img, va2off(cfg, cfg["init_literal"]), syms["se_boot"])
+    put32(img, va2off(cfg, cfg["bss_end_literal"]), cfg["bss_end_new"])
+    put32(img, va2off(cfg, cfg["reserved_literal"]), cfg["reserved_new"])
+
+    return syms, loader, hook
+
+
+def apply_single(cfg, img):
+    stub, syms = build_stub_single(cfg)
     for want in ("se_loader", "se_hook", "se_boot", "se_loaded", "se_stub_end"):
         if want not in syms:
             die("stub is missing the symbol %s" % want)
-    if syms["se_loader"] != STUB_ADDR:
-        die("stub linked at 0x%08X, expected 0x%08X" % (syms["se_loader"], STUB_ADDR))
+    if syms["se_loader"] != cfg["stub_addr"]:
+        die("stub linked at 0x%08X, expected 0x%08X"
+            % (syms["se_loader"], cfg["stub_addr"]))
+    end = cfg["stub_addr"] + len(stub)
+    if end > cfg["stub_limit"]:
+        die("stub is %d bytes and would reach 0x%08X, past the hole"
+            % (len(stub), end))
 
-    end = STUB_ADDR + len(stub)
-    if end > STUB_LIMIT:
-        die("stub is %d bytes and would reach 0x%08X, past the %d available "
-            "before ML's veneer table at 0x00980910"
-            % (len(stub), end, STUB_LIMIT - STUB_ADDR))
-
-    # --- verify the gui hook site still holds the call we expect ---------
-    have = u32(img, va2off(GUI_BL_SITE))
-    want = bl(GUI_BL_SITE, GUI_HANDLER)
+    have = u32(img, va2off(cfg, cfg["gui_bl_site"]))
+    want = bl(cfg["gui_bl_site"], cfg["gui_handler"])
     if have != want:
         die("the instruction at 0x%08X is 0x%08X, expected 0x%08X "
             "(bl handle_common_events_startup) -- refusing to patch a gui "
-            "task this tool does not recognise" % (GUI_BL_SITE, have, want))
+            "task this tool does not recognise"
+            % (cfg["gui_bl_site"], have, want))
 
-    # --- verify the init-task literal still holds ML's own entry ---------
-    have_init = u32(img, va2off(INIT_LITERAL))
-    if have_init != ML_INIT_TASK:
+    have_init = u32(img, va2off(cfg, cfg["init_literal"]))
+    if have_init != cfg["ml_init_task"]:
         die("the init-task literal at 0x%08X is 0x%08X, expected 0x%08X -- "
             "refusing to retarget a boot path this tool does not recognise"
-            % (INIT_LITERAL, have_init, ML_INIT_TASK))
+            % (cfg["init_literal"], have_init, cfg["ml_init_task"]))
 
-    # ------------------------------------------------------------ apply
-    img[va2off(STUB_ADDR):va2off(STUB_ADDR) + len(stub)] = stub
-    put32(img, va2off(GUI_BL_SITE), bl(GUI_BL_SITE, syms["se_hook"]))
-    put32(img, va2off(INIT_LITERAL), syms["se_boot"])
+    img[va2off(cfg, cfg["stub_addr"]):
+        va2off(cfg, cfg["stub_addr"]) + len(stub)] = stub
+    put32(img, va2off(cfg, cfg["gui_bl_site"]),
+          bl(cfg["gui_bl_site"], syms["se_hook"]))
+    put32(img, va2off(cfg, cfg["init_literal"]), syms["se_boot"])
+    return syms, stub, end
 
-    if len(img) != STOCK_SIZE:
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--platform", default=os.environ.get("PLATFORM", "5DC.111"),
+                    help="platform directory under ml/platforms/ (default: 5DC.111)")
+    args = ap.parse_args()
+    cfg = load_platform(args.platform)
+
+    stock = os.path.join(ROOT, "vendor", cfg["vendor"], "autoexec.bin")
+    if not os.path.exists(stock):
+        die("Magic Lantern's autoexec.bin is missing.\n\n"
+            "  Expected it at:\n    %s\n\n"
+            "  It is not shipped here. Put the %s build from\n"
+            "  %s at that path.\n"
+            "  The build this was written against is\n"
+            "  %s.\n"
+            % (stock, cfg["name"], cfg.get("vendor_hint", "Magic Lantern"),
+               cfg.get("vendor_build", "(see platform README)")))
+
+    img = bytearray(open(stock, "rb").read())
+    if len(img) != cfg["stock_size"]:
+        die("stock AUTOEXEC.BIN is %d bytes, expected %d"
+            % (len(img), cfg["stock_size"]))
+    verify_magic(cfg, img)
+    check_stacks()
+
+    style = cfg.get("stub_style", "split")
+    if style == "split":
+        syms, loader, hook = apply_split(cfg, img)
+    elif style == "single":
+        syms, stub, end = apply_single(cfg, img)
+    else:
+        die("unknown stub_style %r in patch.json" % style)
+
+    csum = cfg.get("checksum", "none")
+    if csum == "xor_bx_r3":
+        fix_checksum_xor_bx_r3(img)
+    elif csum != "none":
+        die("unknown checksum %r in patch.json" % csum)
+
+    if len(img) != cfg["stock_size"]:
         die("internal error: the image changed size")
 
     os.makedirs(OUTDIR, exist_ok=True)
     out = os.path.join(OUTDIR, "AUTOEXEC.BIN")
     open(out, "wb").write(img)
 
-    # the payload travels separately
     pay = open(os.path.join(PAYDIR, "soupeng.bin"), "rb").read()
     if len(pay) < 0x48 or u32(bytearray(pay), 0) != 0x4D4C4946:
         die("ml/payload/soupeng.bin has no 'FILM' header")
-    check_header(bytearray(pay))
-    open(os.path.join(OUTDIR, "SE.BIN"), "wb").write(pay)
+    check_header(cfg, bytearray(pay))
+    se_out = os.path.join(OUTDIR, "SE.BIN")
+    open(se_out, "wb").write(pay)
 
-    print("wrote %s  (%d bytes, unchanged)" % (out, len(img)))
-    print("wrote %s  (%d bytes)" % (os.path.join(OUTDIR, "SE.BIN"), len(pay)))
-    print()
-    print("  stub      0x%08X .. 0x%08X  (%d bytes, %d spare)"
-          % (STUB_ADDR, end, len(stub), STUB_LIMIT - end))
-    print("  gui hook  0x%08X -> 0x%08X (was 0x%08X)"
-          % (GUI_BL_SITE, syms["se_hook"], GUI_HANDLER))
-    print("  screen    ours: TRASH opens it. We ASK Canon for the panel -- a")
-    print("            fake MENU press, the way ML's menu_open does at")
-    print("            0x0098728C -- and never touch TurnOnDisplay or")
-    print("            ShowBitmap. The palette is reasserted before every")
-    print("            frame, because Canon restores its own on every")
-    print("            panel-on. ML's menu is not patched and never opens.")
-    print("  boot      init task entry 0x%08X -> 0x%08X, chains 0x%08X"
-          % (INIT_LITERAL, syms["se_boot"], ML_INIT_TASK))
-    print("            the engine starts at power-on; a missing SE.BIN still boots")
-    print("  ML's code untouched; no instruction of Magic Lantern's is rewritten")
+    if cfg.get("card_copy", True):
+        os.makedirs(CARD, exist_ok=True)
+        open(os.path.join(CARD, "AUTOEXEC.BIN"), "wb").write(img)
+        open(os.path.join(CARD, "SE.BIN"), "wb").write(pay)
+
+    print("platform  %s" % cfg["name"])
+    print("wrote %s  (%d bytes, same length)" % (out, len(img)))
+    print("wrote %s  (%d bytes)" % (se_out, len(pay)))
+    if cfg.get("card_copy", True):
+        print("copied both onto %s" % CARD)
+
+    if style == "split":
+        print("  loader    0x%08X .. 0x%08X  (%d bytes, %d spare)"
+              % (cfg["loader_addr"], syms["se_loader_end"], len(loader),
+                 cfg["loader_limit"] - syms["se_loader_end"]))
+        print("  hook      0x%08X  (%d bytes)" % (cfg["hook_addr"], len(hook)))
+        print("  gui hook  0x%08X -> 0x%08X (was 0x%08X)"
+              % (cfg["gui_bl_site"], syms["se_hook"], cfg["gui_handler"]))
+        print("  boot      init task 0x%08X -> 0x%08X, chains 0x%08X"
+              % (cfg["init_literal"], syms["se_boot"], cfg["ml_init_task"]))
+        if "bss_end_new" in cfg:
+            print("  reserve   user_mem_start 0x%08X, %d bytes for SE.BIN"
+                  % (cfg["bss_end_new"],
+                     cfg["bss_end_new"] - cfg["payload_base"]))
+    else:
+        print("  stub      0x%08X .. 0x%08X  (%d bytes, %d spare)"
+              % (cfg["stub_addr"], end, len(stub), cfg["stub_limit"] - end))
+        print("  gui hook  0x%08X -> 0x%08X (was 0x%08X)"
+              % (cfg["gui_bl_site"], syms["se_hook"], cfg["gui_handler"]))
+        print("  boot      init task entry 0x%08X -> 0x%08X, chains 0x%08X"
+              % (cfg["init_literal"], syms["se_boot"], cfg["ml_init_task"]))
 
 
 if __name__ == "__main__":

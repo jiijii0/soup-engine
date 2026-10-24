@@ -1,8 +1,11 @@
-# The soup engine payload: a freestanding ARM blob for the 5D Classic.
+# The soup engine payload: a freestanding ARM blob for one camera body.
 #
 # This does not build Magic Lantern. It builds a standalone image that is
-# spliced into the known-good 2012 AUTOEXEC.BIN by tools/patch-soupeng.py,
-# which is why none of Magic Lantern's headers or stubs appear here.
+# spliced into a known-good AUTOEXEC.BIN by tools/patch-film.py. Camera-
+# specific addresses live under ml/platforms/$(PLATFORM)/.
+
+PLATFORM ?= 50D.109
+PLATDIR  = ../platforms/$(PLATFORM)
 
 CROSS   ?= arm-none-eabi-
 CC       = $(CROSS)gcc
@@ -13,14 +16,14 @@ NM       = $(CROSS)nm
 
 ENGINE  = ../../engine
 
-# -mcpu=arm946e-s: DIGIC II. No FPU and no hardware divide, so the engine is
-# fixed-point throughout; -mno-unaligned-access because this core faults on
-# unaligned word loads rather than fixing them up.
+# -mcpu=arm946e-s: DIGIC II / DIGIC 4. No FPU and no hardware divide, so the
+# engine is fixed-point throughout; -mno-unaligned-access because this core
+# faults on unaligned word loads rather than fixing them up.
 CFLAGS  = -std=c99 -Os -marm -mcpu=arm946e-s -mno-unaligned-access \
           -ffreestanding -fno-builtin -fno-common -fomit-frame-pointer \
           -ffunction-sections -fdata-sections \
           -Wall -Wextra -Wno-unused-parameter -Wno-missing-field-initializers \
-          -I. -I$(ENGINE)
+          -I$(PLATDIR) -I. -I$(ENGINE)
 
 # Homebrew's arm-none-eabi-gcc ships no libc headers at all, so the few the
 # engine needs (stdint.h, stddef.h) come from the compiler itself -- those are
@@ -43,7 +46,7 @@ CFLAGS  = -std=c99 -Os -marm -mcpu=arm946e-s -mno-unaligned-access \
 # is why the desktop suite stayed honest while this one quietly did not.
 CFLAGS += -MMD -MP
 
-LDFLAGS = -T payload.ld --gc-sections -nostdlib --no-warn-rwx-segments
+LDFLAGS = -T $(PLATDIR)/payload.ld --gc-sections -nostdlib --no-warn-rwx-segments
 
 # ARM946E-S has no FPU and no hardware divide instruction. The engine's
 # per-pixel paths are all fixed-point, but its *setup* paths legitimately use
@@ -85,7 +88,7 @@ look.o: $(ENGINE)/look.c
 %.o: $(ENGINE)/%.c
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-soupeng.elf: $(OBJ) payload.ld
+soupeng.elf: $(OBJ) $(PLATDIR)/payload.ld
 	$(LD) $(LDFLAGS) -o $@ $(OBJ) $(LIBGCC)
 	@# A libgcc helper the engine did not expect would be an undefined
 	@# symbol here; -nostdlib means the link would have failed already.
@@ -93,7 +96,7 @@ soupeng.elf: $(OBJ) payload.ld
 
 soupeng.bin: soupeng.elf
 	$(OBJCOPY) -O binary $< $@
-	@echo "payload: $$(stat -f%z $@ 2>/dev/null || stat -c%s $@) bytes at 0x009D0000"
+	@echo "payload ($(PLATFORM)): $$(stat -f%z $@ 2>/dev/null || stat -c%s $@) bytes"
 
 # What the blob costs, section by section. Worth watching: the budget is
 # 160 KB of image plus a 32 KB stack above it.

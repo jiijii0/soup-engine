@@ -41,17 +41,26 @@ W, H, PITCH = 720, 240, 360
 
 def render(path, out, zoom=2, vstretch=2):
     d = open(path, 'rb').read()
-    assert len(d) >= PITCH * H, f"short buffer: {len(d)}"
-    ow, oh = W * zoom, H * vstretch * zoom
+    # 50D overlay: 960x480, one byte per pixel, already square.
+    # 5D Classic UI buffer: 360x240, two 4-bit pixels per byte, double-tall.
+    if len(d) >= 960 * 480:
+        w, h, pitch, eight, stretch = 720, 480, 960, True, 1
+    else:
+        assert len(d) >= 360 * 240, f"short buffer: {len(d)}"
+        w, h, pitch, eight, stretch = 720, 240, 360, False, vstretch
+    ow, oh = w * zoom, h * stretch * zoom
     rows = []
-    for y in range(H):
+    for y in range(h):
         line = bytearray()
-        for x in range(W):
-            b = d[(x >> 1) + y * PITCH]
-            c = (b >> 4) if (x & 1) else (b & 0x0F)
+        for x in range(w):
+            if eight:
+                c = d[x + y * pitch] & 0x0F
+            else:
+                b = d[(x >> 1) + y * pitch]
+                c = (b >> 4) if (x & 1) else (b & 0x0F)
             r, g, bl = PAL[c]
             line += bytes((r, g, bl)) * zoom
-        for _ in range(vstretch * zoom):
+        for _ in range(stretch * zoom):
             rows.append(bytes(line))
     raw = b''.join(b'\x00' + r for r in rows)
     def chunk(t, dd):

@@ -91,6 +91,8 @@ static se_log_fn      g_log;
 static void          *g_log_ctx;
 static se_progress_fn g_prog;
 static void          *g_prog_ctx;
+static se_progress_fn g_fine;
+static void          *g_fine_ctx;
 
 void se_set_log(se_log_fn fn, void *ctx) { g_log = fn; g_log_ctx = ctx; }
 
@@ -110,4 +112,11 @@ void se_set_progress(se_progress_fn fn, void *ctx) { g_prog = fn; g_prog_ctx = c
 void se_progress(const char *stage, int percent)
 {
     if (g_prog) g_prog(g_prog_ctx, stage, percent);
+}
+
+void se_set_progress_fine(se_progress_fn fn, void *ctx) { g_fine = fn; g_fine_ctx = ctx; }
+
+void se_progress_fine(const char *stage, int hundredths)
+{
+    if (g_fine) g_fine(g_fine_ctx, stage, hundredths);
 }

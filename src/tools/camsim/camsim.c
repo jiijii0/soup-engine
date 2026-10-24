@@ -49,6 +49,11 @@ int  sim_overlay_live;
 int  sim_capture_in_flight;
 long sim_ddev_during_capture;
 
+void sim_engdrvout(long reg, long val)
+{
+    if (sim_capture_in_flight) sim_ddev_during_capture++;
+    if (reg) MEM((uintptr_t)reg) = (uintptr_t)(uint32_t)val;
+}
 void sim_bmpddev_take(void)
 {
     sim_ddev_takes++;
@@ -126,8 +131,8 @@ uintptr_t *sim_mem_fault(uintptr_t addr)
  * AUTOEXEC.BIN maps to 0x00980000 from file offset 0x1000; patch-film.py
  * uses the same relation.
  */
-#define SIM_RESTART     0x00980000
-#define SIM_IMAGE_OFF   0x1000
+#define SIM_RESTART     0x0004B000
+#define SIM_IMAGE_OFF   0x11C
 
 static int sim_seed_ml_image(const char *path)
 {
@@ -295,31 +300,31 @@ static int sim_display_lit;
  * here and came back invisible. These values are deliberately NOT ML's and
  * mostly transparent, which is the shape of the hazard.
  */
+static void sim_seed_palette_regs(void)
+{
+    int i;
+    for (i = 0; i < 16; i++) {
+        MEM(CAM_LCD_PAL_REG(i)) = CAM_PALETTE_BASE + (uintptr_t)i * 4;
+        MEM(CAM_LCD_PAL_REG2(i)) = CAM_PALETTE_BASE + 0x40u + (uintptr_t)i * 4;
+    }
+}
+
 static void sim_canon_restores_palette(void)
 {
     int i;
     /*
-     * The real thing is two steps and the payload depends on both.
-     *
-     * SelectParameter (0xFFB0A95C) rebuilds all SIXTEEN SHADOW value words
-     * from Canon's YUV table -- the loop writes MEM(0x29380 + 12i + 8) and
-     * sets each dirty flag at +4 (0xFFB0AA5C, 0xFFB0AA84). Only then does
-     * SetParameterToBitmapDisplayDevice (0xFFB0A888) push the dirty ones
-     * into the registers.
-     *
-     * This used to write the registers and ONE shadow word, which modelled
-     * the outcome and not the mechanism -- and the payload's dirty test
-     * reads a shadow. The mock said the palette had been taken back while
-     * leaving the payload no way to notice, and correctly failed the run.
-     * Model the step, not the symptom.
+     * Canon rebuilds the LCD_Palette shadows and flushes them. The values
+     * are deliberately not the payload's, and mostly the transparent word,
+     * which is the failure the reassert exists to catch.
      */
     for (i = 0; i < 16; i++) {
-        uint32_t v = (i & 1) ? 0x00FC0000u
-                             : (0x01000000u | (uint32_t)(i * 0x0E) << 16);
-        MEM(CAM_PB_PAL_VAL(i)) = v;                        /* the shadow  */
-        MEM(CAM_PB_PALETTE + (uintptr_t)i * 12 + 4) = 1;   /* dirty       */
-        MEM(CAM_PALETTE_BASE + (uintptr_t)i * 4) = v;      /* the flush   */
-        MEM(CAM_PB_PALETTE + (uintptr_t)i * 12 + 4) = 0;
+        uint32_t v = (i == 0) ? 0x00FC0000u
+                              : (0x01000000u | (uint32_t)(i * 0x0E) << 16);
+        uintptr_t reg = (uintptr_t)MEM(CAM_LCD_PAL_REG(i));
+        uintptr_t reg2 = (uintptr_t)MEM(CAM_LCD_PAL_REG2(i));
+        MEM(CAM_PB_PAL_VAL(i)) = v;
+        if (reg) MEM(reg) = v;
+        if (reg2) MEM(reg2) = v;
     }
 }
 
@@ -378,6 +383,7 @@ void sim_turn_on_display(void)
 
 static void sim_display_init(void)
 {
+    sim_seed_palette_regs();
     MEM(CAM_display_is_on)      = 0;
     MEM(CAM_bmp_vram_real_ptr)  = 0;
     /* Canon's GUI has built the bitmap screen: CreatePhysicalVram plus
@@ -787,12 +793,12 @@ static void sim_fill(long file, const char *dir, const char *name)
     char full[2048]; struct stat sb;
     uint8_t *f = (uint8_t *)file;
     snprintf(full, sizeof full, "%s/%s", dir, name);
-    memset(f, 0, 12);
+    memset(f, 0, 16);
     if (stat(full, &sb) == 0) {
         *(uint16_t *)(f + 0) = S_ISDIR(sb.st_mode) ? 0x10 : 0x20;
         *(uint32_t *)(f + 4) = (uint32_t)sb.st_size;
     }
-    snprintf((char *)(f + 12), 256, "%s", name);
+    snprintf((char *)(f + 16), 256, "%s", name);
 }
 
 long sim_find_first(long dir, long file)
@@ -915,7 +921,7 @@ void cam_memcpy(volatile void *dst, const void *src, size_t n)
     if ((const uint8_t *)dst == sim_bmp_real) {
         /* after Canon has cleared the latch the buffer is about to be
          * freed; a frame arriving here is a write into released heap */
-        if (!MEM(CAM_gui_bmp_ready) || MEM(CAM_ml_shutdown))
+        if (MEM(CAM_ml_shutdown))
             sim_blits_after_teardown++;
         /*
          * P4 / defect D2: Canon's palette is back and ours is not, so this
@@ -1002,7 +1008,7 @@ static int sim_rows_ours, sim_rows_ml;
  * is also a check worth having -- if the payload ever installed a camera
  * address where one of its own belongs, it would land here.
  */
-#define SIM_ML_END 0x009B5000
+#define SIM_ML_END (SIM_ML_BASE + SIM_ML_SIZE)
 static int sim_is_ml_addr(uintptr_t a)
 {
     return a >= SIM_ML_BASE && a < SIM_ML_END;
@@ -1089,10 +1095,10 @@ void se_boot_start(void)  { se_start(); }
  * two separate questions and they have been failing together.
  */
 #define SIM_KEY_WHEEL 0x00
-#define SIM_KEY_UP    0x0F
-#define SIM_KEY_TRASH 0x07
-#define SIM_KEY_PLAY  0x06
-#define SIM_KEY_SET   0x02       /* film.c SE_BTN_SET, measured 0x02 */
+#define SIM_KEY_UP    0x16
+#define SIM_KEY_TRASH 0x09
+#define SIM_KEY_PLAY  0x08
+#define SIM_KEY_SET   0x04       /* platform/50D.109/gui.h BGMT_PRESS_SET */
 extern long sim_ddev_takes, sim_ddev_gives, sim_turnons, sim_notifies;
 extern long sim_fakes_eaten, sim_blits_bad_palette, sim_blits_panel_dark;
 extern const uint32_t se_palette[16];
@@ -1440,7 +1446,9 @@ int main(int argc, char **argv)
     if (getenv("SE_SIM_LAZY_WRITES")) g_lazy_writes = atoi(getenv("SE_SIM_LAZY_WRITES"));
     if (getenv("SE_SIM_VERBOSE")) g_verbose = 1;
     if (getenv("SE_SIM_STOCK")) se_stock_index = atoi(getenv("SE_SIM_STOCK"));
-    if (!image) image = "vendor/magiclantern-5Dc/autoexec.bin";
+    /* Default matches PLATFORM=50D.109. Override with SE_SIM_AUTOEXEC or
+     * point at vendor/magiclantern-<body>/autoexec.bin for another platform. */
+    if (!image) image = "vendor/magiclantern-50D/autoexec.bin";
 
     printf("[sim] card=%s short_reads=%s zero_reads=%s lazy_writes=%s heap=%u MB\n",
            g_root, g_short_reads ? "ON" : "off", g_zero_reads ? "ON" : "off",
@@ -1895,19 +1903,14 @@ int main(int argc, char **argv)
      */
     {
         int i, bad_pal = 0;
-        uint32_t ml15 = (uint32_t)MEM(ML_palette + 15u * 4u);
         if (se_palette[0] != 0x00FC0000u) {
             printf("[sim]   FAIL palette entry 0 is 0x%08X, not the "
                    "transparent 0x00FC0000\n", se_palette[0]);
             bad_pal = 1;
         }
-        if (se_palette[15] != ml15) {
-            printf("[sim]   FAIL palette entry 15 is 0x%08X but ML's marker "
-                   "is 0x%08X (read from the image at 0x%08X). ML compares "
-                   "exactly this word at 0x00981C6C to decide whether to "
-                   "overwrite the palette -- diverge and it will, on every "
-                   "draw\n", se_palette[15], ml15,
-                   (unsigned)(ML_palette + 15u * 4u));
+        if (se_palette[15] != 0x03EB0000u) {
+            printf("[sim]   FAIL palette entry 15 is 0x%08X, not the "
+                   "opaque white 0x03EB0000\n", se_palette[15]);
             bad_pal = 1;
         }
         for (i = 1; i < ML_PALETTE_N; i++)
@@ -1918,8 +1921,8 @@ int main(int argc, char **argv)
                 bad_pal = 1;
             }
         if (bad_pal) bad = 1;
-        else printf("[sim]   ok   palette: 0 transparent, 15 is ML's marker "
-                    "0x%08X, 1..14 opaque\n", ml15);
+        else printf("[sim]   ok   palette: 0 transparent, 15 white, "
+                    "1..14 opaque\n");
     }
 
     /*

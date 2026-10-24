@@ -68,39 +68,18 @@
 #define SE_ASSERT_AT_BUILD(name, cond) \
     typedef char se_build_assert_##name[(cond) ? 1 : -1]
 
+/* UI buffer geometry is shared; panel geometry comes from mlmap.h. */
 SE_ASSERT_AT_BUILD(bmp_width,   SE_UI_W == 720);
-SE_ASSERT_AT_BUILD(bmp_rows,    SE_UI_H == ML_BMP_ROWS);
-SE_ASSERT_AT_BUILD(bmp_pitch,   SE_UI_PITCH == ML_BMP_PITCH);
-SE_ASSERT_AT_BUILD(bmp_bytes,   SE_UI_FB_SIZE == ML_BMP_BYTES);
-SE_ASSERT_AT_BUILD(bmp_86400,   ML_BMP_BYTES == 0x15180);
-/* two 4-bit pixels to a byte, which is what makes the pitch half the width */
+SE_ASSERT_AT_BUILD(bmp_ui_rows, SE_UI_H == 240);
+SE_ASSERT_AT_BUILD(bmp_ui_pitch, SE_UI_PITCH == 360);
 SE_ASSERT_AT_BUILD(bmp_4bpp,    SE_UI_PITCH * 2 == SE_UI_W);
+SE_ASSERT_AT_BUILD(bmp_bytes,   ML_BMP_BYTES == ML_BMP_PITCH * ML_BMP_ROWS);
 
-/* FAKE_BTN is 0xFFFE1DC0, from fake_simple_button's literal pool at
- * 0x00988438 -- and the camera logged exactly that word in ev[3].
- * docs/ML_DISPLAY.md 3.12, 10.5. */
 SE_ASSERT_AT_BUILD(fake_btn,    (unsigned)SE_FAKE_BTN == 0xFFFE1DC0u);
-/* BGMT_MENU is 3, from menu_open's `moveq r0, #3` at 0x00987288. */
-SE_ASSERT_AT_BUILD(bgmt_menu,   SE_BGMT_MENU == 3);
-/* The palette marker is ML's entry 15, compared at 0x00981C6C against the
- * shadow value for register 0xC0F140BC (pair table 0xFFB6AF50 entry 20,
- * 12-byte structs with the value at +8, so 0x00029434 + 8). */
+SE_ASSERT_AT_BUILD(bgmt_menu,   SE_BGMT_MENU == SE_BTN_MENU);
 SE_ASSERT_AT_BUILD(pal_mark,    SE_PALETTE_MARK == 0x03EB0000);
-/* and the marker must be the word we actually write to entry 15, or the
- * dirty test is comparing against a value nobody ever put there. The table
- * is checked against this in tools/camsim; here is the half the compiler
- * can see. */
 SE_ASSERT_AT_BUILD(pal_white,   SE_C_WHITE == 15);
 SE_ASSERT_AT_BUILD(pal_clear,   SE_C_CLEAR == 0);
-SE_ASSERT_AT_BUILD(pal_dirty,   CAM_PB_PALETTE_DIRTY == CAM_PB_PALETTE + 0xBC);
-/* Each PB_Palette entry is twelve bytes with its value at +8. The stride
- * is pinned by the measured pair table at 0xFFB6AF50: entry 15's struct is
- * 0x00029434 there, and ML reads its value word at 0x0002943C -- which is
- * the assertion above. These two fix our own marker on the same grid. */
-SE_ASSERT_AT_BUILD(pal_mine,    CAM_PB_PAL_MINE == 0x000293D0);
-SE_ASSERT_AT_BUILD(pal_e15,     CAM_PB_PAL_VAL(15) == 0x0002943C);
-/* and the marker must be a word ML does not write: ML only ever stamps
- * entry 15 (0x00981C80), so ours must not be entry 15 */
 SE_ASSERT_AT_BUILD(pal_notml,   SE_PAL_MINE_INDEX != 15);
 /* The screen must paint on every tick: Canon's own menu is underneath ours
  * and redraws on its own schedule. docs/ML_DISPLAY.md 13 (C6). */
@@ -142,35 +121,7 @@ SE_ASSERT_AT_BUILD(pal_notml,   SE_PAL_MINE_INDEX != 15);
 #define SE_FONT(fg, bg) (0x00030000u | ((unsigned)(bg) << 8) | (unsigned)(fg))
 
 
-/*
- * The 5D Classic's buttons, as event->param reaches the GUI task.
- *
- * From Magic Lantern's gui.h for this body -- the only place they are
- * written down -- and confirmed in part on the camera, where one 0x00
- * changed the stock from CINE to VELVIA.
- *
- * Both wheels send the same codes. The body has a rear Quick Control Dial
- * and a top main dial and there is no way to tell them apart here, which
- * is why the top one cycled ML's menu pages while the rear one changed the
- * film: the same two events arriving in two places.
- */
-#define SE_BTN_WHEEL_UP     0x00
-#define SE_BTN_WHEEL_DOWN   0x01
-#define SE_BTN_SET          0x02
-#define SE_BTN_MENU         0x03
-#define SE_BTN_INFO         0x04
-#define SE_BTN_JUMP         0x05
-#define SE_BTN_PLAY         0x06
-#define SE_BTN_TRASH        0x07
-#define SE_BTN_UNPRESS_UDLR 0x0E
-#define SE_BTN_UP           0x0F
-#define SE_BTN_UP_RIGHT     0x10
-#define SE_BTN_UP_LEFT      0x11
-#define SE_BTN_RIGHT        0x12
-#define SE_BTN_LEFT         0x13
-#define SE_BTN_DOWN_RIGHT   0x14
-#define SE_BTN_DOWN_LEFT    0x15
-#define SE_BTN_DOWN         0x16
+/* Button codes: SE_BTN_* from the platform cam.h. */
 
 int se_stock_index = 0;
 int se_res_index   = 0;        /* 0 = half size, 1 = the preview's own */
@@ -623,23 +574,17 @@ static int read_file(const char *path, void *buf, size_t cap)
 #define ATTR_DIRECTORY 0x10
 
 /*
- * What Canon's FindFirstEx actually fills, read off its disassembly rather
- * than copied from a newer Magic Lantern tree -- whose layout is different
- * and put the name four bytes further along, which is enough on its own to
- * turn every filename into rubbish:
- *
- *     strh  attr, [file]          @ +0x00, the FAT attribute byte
- *     str   size, [file, #4]      @ +0x04
- *     str   time, [file, #8]      @ +0x08
- *     strcpy(file + 12, entry)    @ +0x0C, NUL-terminated
- *
- * The name is copied with no bound, so the buffer has to be generous.
+ * What FIO_FindFirstEx fills on DIGIC 4, from Magic Lantern's fio-ml.h
+ * under CONFIG_DIGIC_45 (the 50D is DIGIC IV, and that is the layout the
+ * 50D.109 build compiles). The name sits four bytes later than on the
+ * 5D Classic. A walk that used the old offset would list garbage.
  */
 struct fio_file {
     uint16_t mode;          /* FAT attributes; 0x10 = directory */
     uint16_t pad;
     uint32_t size;
     uint32_t timestamp;
+    uint32_t unk;
     char     name[256];
 };
 
@@ -1456,37 +1401,28 @@ static volatile int      se_canon_pal_have;
 static void se_set_palette(void)
 {
     int i;
-    /*
-     * Not with the panel dark. ML refuses in two places on this path --
-     * set_ml_palette itself at 0x00981BD4 (`ldr r3,[0xF000+0xCA0]; cmp
-     * r3,#0; beq`) and EngDrvOut at 0x00989134, through which every one of
-     * those sixteen stores goes. We were writing sixteen DIGIC registers
-     * with the display off, which ML's own code will not do.
-     */
+
     if (!MEM(CAM_display_is_on)) return;
 
-    CAM_CALL0(CAM_BmpDDev_take, void);                /* 0x00981C78 */
     if (!se_canon_pal_have) {
-        /* from the shadows, not the registers -- same values, and the
-         * registers are write-only as far as this firmware is concerned */
         for (i = 0; i < 16; i++)
             se_canon_pal[i] = (uint32_t)MEM(CAM_PB_PAL_VAL(i));
         se_canon_pal_have = 1;
     }
-    for (i = 0; i < 16; i++)
-        MEM(CAM_PALETTE_BASE + (uintptr_t)i * 4) = se_palette[i];
-    MEM(CAM_PALETTE_LATCH) = 1;                       /* 0x00981C24 */
     /*
-     * Claim it, exactly as ML does at 0x00981C80 (`str r5, [r4, #0xBC]`).
-     * This is not bookkeeping of ours -- it writes Canon's own shadow for
-     * register 0xC0F140BC, so Canon's next flush keeps our value and the
-     * next time Canon rebuilds the palette the word changes and we notice.
+     * DIGIC 4 keeps the palette in LCD_Palette: word 0 of each triple is
+     * the register EngDrvOut writes, word 2 is the shadow a later flush
+     * will put back. Both have to move, or the next flush restores Canon
+     * and the frame is drawn in the wrong colours. Entry 0 stays the
+     * transparent word; the other fifteen are ours.
      */
-    MEM(CAM_PB_PALETTE_DIRTY) = SE_PALETTE_MARK;
-    /* and our own, in a word ML never writes, so the two questions stay
-     * separate however ML's goes */
-    MEM(CAM_PB_PAL_MINE) = se_palette[SE_PAL_MINE_INDEX];
-    CAM_CALL0(CAM_BmpDDev_give, void);                /* 0x00981C88 */
+    for (i = 0; i < 16; i++) {
+        uintptr_t reg = (uintptr_t)MEM(CAM_LCD_PAL_REG(i));
+        uintptr_t reg2 = (uintptr_t)MEM(CAM_LCD_PAL_REG2(i));
+        MEM(CAM_PB_PAL_VAL(i)) = se_palette[i];
+        if (reg)  CAM_CALL2(CAM_EngDrvOut, void, reg, se_palette[i]);
+        if (reg2) CAM_CALL2(CAM_EngDrvOut, void, reg2, se_palette[i]);
+    }
 }
 
 /* ===================================================================== */
@@ -1676,12 +1612,12 @@ static int se_paint(void)
      * after it has been freed. The second is a write into released heap,
      * ten times a second, while the camera is trying to power down.
      */
-    if (!MEM(CAM_gui_bmp_ready) || se_shutting_down()) {
+    if (se_shutting_down()) {
         se_scr_dark++;
         return 0;
     }
 
-    p = (uintptr_t)MEM(CAM_bmp_vram_real_ptr);
+    p = cam_overlay_ptr();
     se_scr_buf = p;
     if (!cam_panel_ptr_ok(p)) { se_scr_badptr++; return 0; }
     if (!se_fb) { se_scr_nomem++; return 0; }
@@ -1752,12 +1688,28 @@ static int se_paint(void)
      * than simplified because "the same effect as far as can be told from
      * here" is what the lazy-write bug looked like too.
      */
+    /*
+     * The UI buffer is 720x240, two 4-bit pixels per byte, drawn for a
+     * panel whose pixels are square. The 50D overlay is 720x480 inside a
+     * 960-byte stride, one byte per pixel. Each source row is written
+     * twice and each nibble becomes its own byte. Row 0 is a single
+     * memcpy of pitch bytes so the simulator's first-row checks still
+     * see one frame.
+     */
     {
-        int row;
-        for (row = 0; row < ML_BMP_ROWS; row++)
-            cam_memcpy(hw + (unsigned)row * ML_BMP_PITCH,
-                       se_fb + (unsigned)row * ML_BMP_PITCH,
-                       ML_BMP_PITCH);
+        int y, x;
+        uint8_t line[ML_BMP_PITCH];
+
+        for (y = 0; y < SE_UI_H; y++) {
+            const uint8_t *src = se_fb + (unsigned)y * SE_UI_PITCH;
+            for (x = 0; x < SE_UI_W; x++) {
+                uint8_t b = src[x >> 1];
+                line[x] = (x & 1) ? (uint8_t)(b >> 4) : (uint8_t)(b & 0x0F);
+            }
+            for (; x < ML_BMP_PITCH; x++) line[x] = 0;
+            cam_memcpy(hw + (unsigned)(y * 2) * ML_BMP_PITCH, line, ML_BMP_PITCH);
+            cam_memcpy(hw + (unsigned)(y * 2 + 1) * ML_BMP_PITCH, line, ML_BMP_PITCH);
+        }
     }
     se_scr_blits++;
     return 1;
@@ -1980,7 +1932,7 @@ void se_screen(void)
                  */
                 for (tries = 0; tries < 200; tries++) {     /* up to 2 s */
                     if (MEM(CAM_display_is_on) &&
-                        cam_panel_ptr_ok(MEM(CAM_bmp_vram_real_ptr))) break;
+                        cam_panel_ptr_ok(cam_overlay_ptr())) break;
                     /* the user changed their mind: stop waiting for a
                      * panel we are no longer going to draw on */
                     if (!se_scr_want) break;
@@ -2067,7 +2019,7 @@ void se_screen(void)
 
 /* ---------------------------------------------------------------- paint */
 
-static const char *const se_res_name[2] = { "1.0 MP", "4.2 MP" };
+static const char *const se_res_name[2] = { "HALF", "FULL" };
 
 
 /* Advance to the next stock, wrapping. */
@@ -3548,8 +3500,10 @@ int se_key(void *ev)
     /* Inverted deliberately: turning the wheel the way the list reads on
      * screen should move forward through it, and on this body the code
      * named UP is the direction that felt backwards in the hand. */
-    case SE_BTN_WHEEL_UP:    se_prev_stock();    return 0;
-    case SE_BTN_WHEEL_DOWN:  se_next_stock();    return 0;
+    case SE_BTN_WHEEL_UP:
+    case SE_BTN_WHEEL_LEFT:  se_prev_stock();    return 0;
+    case SE_BTN_WHEEL_DOWN:
+    case SE_BTN_WHEEL_RIGHT: se_next_stock();    return 0;
 
     case SE_BTN_UP:    case SE_BTN_UP_RIGHT:   case SE_BTN_UP_LEFT:
     case SE_BTN_RIGHT: case SE_BTN_LEFT:

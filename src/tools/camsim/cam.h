@@ -31,13 +31,12 @@
 #include <string.h>
 
 /*
- * The map of ML's image. Deliberately a relative path: this file is not on
- * the simulator's include path, so there is exactly one copy of these
- * numbers and no way for the two sides to drift apart. A four-byte error in
- * the Debug entry layout once lived in both at once, and the simulator
- * dutifully agreed with the payload.
+ * The map of ML's image for the active PLATFORM. The build puts
+ * ml/platforms/$(PLATFORM) on the include path after this directory, so
+ * there is exactly one copy of these numbers and no way for the two sides
+ * to drift apart.
  */
-#include "../../ml/payload/mlmap.h"
+#include <mlmap.h>
 
 /* ---- the "addresses" the payload calls through ---------------------- */
 long sim_find_first(long dir, long file);
@@ -81,9 +80,9 @@ long sim_tick_get(void);
  * crash the camera would never see.
  */
 #define SIM_LOW_BASE   0x00000000
-#define SIM_LOW_SIZE   (256 * 1024)        /* Canon's low RAM */
-#define SIM_ML_BASE    0x00980000
-#define SIM_ML_SIZE    (512 * 1024)        /* ML's image, bss and ours */
+#define SIM_LOW_SIZE   (256 * 1024)
+#define SIM_ML_BASE    0x0004B000
+#define SIM_ML_SIZE    (512 * 1024)
 
 #define SIM_REG_BASE  0xC0F14000
 #define SIM_REG_SIZE  0x1000
@@ -140,8 +139,10 @@ static inline int cam_ram_ptr_ok(uintptr_t p)
 /* The display spike. There is no panel here, so camsim models the one
  * thing that matters: DISPLAY_IS_ON and the overlay pointer go from zero to
  * valid when this is called. */
-#define CAM_PALETTE_BASE  0xC0F14080
-#define CAM_PALETTE_LATCH 0xC0F14078
+#define CAM_PALETTE_BASE  0xC0F14800
+#define CAM_PALETTE_LATCH 0xC0F14878
+#define CAM_EngDrvOut     ((uintptr_t)sim_engdrvout)
+void sim_engdrvout(long reg, long val);
 #define CAM_BmpDDev_take  ((uintptr_t)sim_bmpddev_take)
 #define CAM_BmpDDev_give  ((uintptr_t)sim_bmpddev_give)
 void sim_bmpddev_take(void);
@@ -166,8 +167,39 @@ void  sim_hide_bitmap(void);
  * panel lit, rather than touching the display hardware itself. */
 void  sim_gui_control(long code, long a1, long a2, long a3);
 #define CAM_GUI_Control   ((uintptr_t)sim_gui_control)
-#define SE_BGMT_MENU      3
+/* SE_BGMT_MENU / SE_FAKE_BTN / SE_BTN_* come from the platform cam.h via
+ * mlmap.h's sibling — the camera header is substituted entirely by this
+ * file, so the button map is repeated here for the active body. */
+#define SE_BGMT_MENU      5
 #define SE_FAKE_BTN       (-123456)
+
+/* platform/50D.109/gui.h — kept in sync with ml/platforms/50D.109/cam.h */
+#define SE_BTN_WHEEL_UP     0x00
+#define SE_BTN_WHEEL_DOWN   0x01
+#define SE_BTN_WHEEL_LEFT   0x02
+#define SE_BTN_WHEEL_RIGHT  0x03
+#define SE_BTN_SET          0x04
+#define SE_BTN_MENU         0x05
+#define SE_BTN_INFO         0x06
+#define SE_BTN_PLAY         0x08
+#define SE_BTN_TRASH        0x09
+#define SE_BTN_UNPRESS_UDLR 0x15
+#define SE_BTN_UP           0x16
+#define SE_BTN_UP_RIGHT     0x17
+#define SE_BTN_UP_LEFT      0x18
+#define SE_BTN_RIGHT        0x19
+#define SE_BTN_LEFT         0x1A
+#define SE_BTN_DOWN_RIGHT   0x1B
+#define SE_BTN_DOWN_LEFT    0x1C
+#define SE_BTN_DOWN         0x1D
+
+/* The simulator stores the panel buffer directly. The camera header turns
+ * Canon's raw VRAM pointer into the 720x480 crop; here that pointer already
+ * is the buffer. */
+static inline uintptr_t cam_overlay_ptr(void)
+{
+    return (uintptr_t)MEM(CAM_bmp_vram_raw);
+}
 
 /* ---- the calls themselves ------------------------------------------- */
 void *cam_alloc(size_t n);

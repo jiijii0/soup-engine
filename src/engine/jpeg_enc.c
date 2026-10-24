@@ -105,9 +105,9 @@ typedef struct {
     uint8_t *buf;
     int      cap;
     int      data;       /* cursor in the data area        */
-    int      n0, n1;     /* entry counts, IFD0 and Exif    */
-    int      ifd0, ifd1; /* offsets of each directory      */
-    int      e0, e1;     /* write cursors within them      */
+    int      n0, n1, nth;
+    int      ifd0, ifd1, ifd_th;
+    int      e0, e1, e_th;
 } exifw;
 
 static void ew_u16(uint8_t *p, unsigned v) { p[0] = (uint8_t)(v & 0xff); p[1] = (uint8_t)(v >> 8); }
@@ -131,7 +131,7 @@ static int ew_blob(exifw *w, const void *src, int n)
 static void ew_entry(exifw *w, int which, unsigned tag, unsigned type,
                      uint32_t count, const void *data, int inline_bytes)
 {
-    int *cur = which ? &w->e1 : &w->e0;
+    int *cur = which == 2 ? &w->e_th : which ? &w->e1 : &w->e0;
     uint8_t *p = w->buf + *cur;
     ew_u16(p,     tag);
     ew_u16(p + 2, type);
@@ -144,7 +144,9 @@ static void ew_entry(exifw *w, int which, unsigned tag, unsigned type,
         ew_u32(p + 8, at >= 0 ? (uint32_t)at : 0);
     }
     *cur += 12;
-    if (which) w->n1++; else w->n0++;
+    if (which == 2) w->nth++;
+    else if (which) w->n1++;
+    else w->n0++;
 }
 
 static void ew_ascii(exifw *w, int which, unsigned tag, const char *s)
@@ -219,11 +221,14 @@ static int build_exif(uint8_t *out, int cap, const se_jpeg_exif *x,
      */
     #define IFD0_SLOTS 8
     #define EXIF_SLOTS 10
+    #define THUMB_SLOTS 6
     w.ifd0 = 8;
     w.e0   = w.ifd0 + 2;
     w.ifd1 = w.ifd0 + 2 + 12 * IFD0_SLOTS + 4;
     w.e1   = w.ifd1 + 2;
-    w.data = w.ifd1 + 2 + 12 * EXIF_SLOTS + 4;
+    w.ifd_th = w.ifd1 + 2 + 12 * EXIF_SLOTS + 4;
+    w.e_th   = w.ifd_th + 2;
+    w.data   = w.ifd_th + 2 + 12 * (x->thumb ? THUMB_SLOTS : 0) + 4;
 
     ew_ascii(&w, 0, 0x010f, x->make);
     ew_ascii(&w, 0, 0x0110, x->model);
@@ -253,15 +258,29 @@ static int build_exif(uint8_t *out, int cap, const se_jpeg_exif *x,
      * then expects the pointer right there, so it cannot sit at the end of
      * the reserved space.
      */
+    if (x->thumb && x->thumb_len > 0) {
+        int at = ew_blob(&w, x->thumb, x->thumb_len);
+        if (at >= 0) {
+            ew_short(&w, 2, 0x0103, 6);                  /* JPEG thumbnail */
+            ew_long (&w, 2, 0x0201, (uint32_t)at);
+            ew_long (&w, 2, 0x0202, (uint32_t)x->thumb_len);
+        }
+    }
+
     ew_u16(tiff + w.ifd0, (unsigned)w.n0);
-    ew_u32(tiff + w.ifd0 + 2 + 12 * w.n0, 0);
+    ew_u32(tiff + w.ifd0 + 2 + 12 * w.n0, w.nth ? (uint32_t)w.ifd_th : 0);
     ew_u16(tiff + w.ifd1, (unsigned)w.n1);
     ew_u32(tiff + w.ifd1 + 2 + 12 * w.n1, 0);
+    if (w.nth) {
+        ew_u16(tiff + w.ifd_th, (unsigned)w.nth);
+        ew_u32(tiff + w.ifd_th + 2 + 12 * w.nth, 0);
+    }
 
     total = hdr + w.data;
     return total;
     #undef IFD0_SLOTS
     #undef EXIF_SLOTS
+    #undef THUMB_SLOTS
 }
 
 /* ---------------------------------------------------------- output ---- */
@@ -482,16 +501,36 @@ static void encode_block(se_jpeg *j, int32_t *blk, int qtbl, int comp,
 
 /* --------------------------------------------------------- headers ---- */
 
-static void emit_dht(se_jpeg *j, int tc, int th,
-                     const uint8_t *bits, const uint8_t *vals)
+static int dht_bytes(const uint8_t *bits)
+{
+    int i, n = 17;
+    for (i = 1; i <= 16; i++) n += bits[i];
+    return n;
+}
+
+static void emit_dht_one(se_jpeg *j, int tc, int th,
+                         const uint8_t *bits, const uint8_t *vals)
 {
     int i, total = 0;
-    for (i = 1; i <= 16; i++) total += bits[i];
-    jo_u16(j, 0xffc4);
-    jo_u16(j, (unsigned)(2 + 1 + 16 + total));
     jo_byte(j, (uint8_t)((tc << 4) | th));
-    for (i = 1; i <= 16; i++) jo_byte(j, bits[i]);
+    for (i = 1; i <= 16; i++) {
+        jo_byte(j, bits[i]);
+        total += bits[i];
+    }
     jo_bytes(j, vals, (size_t)total);
+}
+
+/* One DHT marker, the way a 50D JPEG packs its four tables. */
+static void emit_dht(se_jpeg *j)
+{
+    int n = dht_bytes(g_dc_lum_bits) + dht_bytes(g_ac_lum_bits)
+          + dht_bytes(g_dc_chr_bits) + dht_bytes(g_ac_chr_bits);
+    jo_u16(j, 0xffc4);
+    jo_u16(j, (unsigned)(2 + n));
+    emit_dht_one(j, 0, 0, g_dc_lum_bits, g_dc_lum_val);
+    emit_dht_one(j, 1, 0, g_ac_lum_bits, g_ac_lum_val);
+    emit_dht_one(j, 0, 1, g_dc_chr_bits, g_dc_chr_val);
+    emit_dht_one(j, 1, 1, g_ac_chr_bits, g_ac_chr_val);
 }
 
 se_err se_jpeg_begin(se_jpeg *j, int width, int height, int quality,
@@ -499,14 +538,18 @@ se_err se_jpeg_begin(se_jpeg *j, int width, int height, int quality,
                      se_jpeg_sink sink, void *ctx)
 {
     int i, scale;
-    static const uint8_t jfif[] = {
-        'J','F','I','F',0, 1,1, 0, 0,1, 0,1, 0,0
-    };
 
     if (width <= 0 || height <= 0 || !strip || !sink) return SE_E_BADFILE;
 
     memset(j, 0, sizeof *j);
     build_all_codes();
+
+    /* 4:2:2 MCUs are 16 pixels wide. The 50D playback decoder rejects a
+     * width that is not a multiple of 16. Drop the extra columns. */
+    j->stride = width;
+    if (width & 15) width &= ~15;
+    if (height & 7) height &= ~7;
+    if (width <= 0 || height <= 0) return SE_E_BADFILE;
 
     j->sink = sink; j->ctx = ctx;
     j->width = width; j->height = height;
@@ -530,12 +573,8 @@ se_err se_jpeg_begin(se_jpeg *j, int width, int height, int quality,
         j->qrecip[1][i] = (uint32_t)((65536u + 4u * j->qt[1][i]) / (8u * j->qt[1][i]));
     }
 
-    /* SOI */
+    /* SOI, then EXIF. A 50D file has no JFIF marker in front of it. */
     jo_u16(j, 0xffd8);
-    /* APP0 JFIF */
-    jo_u16(j, 0xffe0);
-    jo_u16(j, 2 + (unsigned)sizeof jfif);
-    jo_bytes(j, jfif, sizeof jfif);
 
     /* APP1 EXIF, which must follow immediately */
     if (exif) {
@@ -555,23 +594,18 @@ se_err se_jpeg_begin(se_jpeg *j, int width, int height, int quality,
     jo_byte(j, 0x01);
     for (i = 0; i < 64; i++) jo_byte(j, j->qt[1][g_zigzag[i]]);
 
-    /* SOF0, 4:4:4 */
+    /* SOF0, 4:2:2: Y is 2x1, Cb and Cr are 1x1. Same factors as a 50D JPEG. */
     jo_u16(j, 0xffc0);
     jo_u16(j, 8 + 3 * 3);
     jo_byte(j, 8);
     jo_u16(j, (unsigned)height);
     jo_u16(j, (unsigned)width);
     jo_byte(j, 3);
-    for (i = 0; i < 3; i++) {
-        jo_byte(j, (uint8_t)(i + 1));
-        jo_byte(j, 0x11);                       /* no subsampling */
-        jo_byte(j, (uint8_t)(i == 0 ? 0 : 1));  /* quant table id */
-    }
+    jo_byte(j, 1); jo_byte(j, 0x21); jo_byte(j, 0);
+    jo_byte(j, 2); jo_byte(j, 0x11); jo_byte(j, 1);
+    jo_byte(j, 3); jo_byte(j, 0x11); jo_byte(j, 1);
 
-    emit_dht(j, 0, 0, g_dc_lum_bits, g_dc_lum_val);
-    emit_dht(j, 1, 0, g_ac_lum_bits, g_ac_lum_val);
-    emit_dht(j, 0, 1, g_dc_chr_bits, g_dc_chr_val);
-    emit_dht(j, 1, 1, g_ac_chr_bits, g_ac_chr_val);
+    emit_dht(j);
 
     /* SOS */
     jo_u16(j, 0xffda);
@@ -585,39 +619,48 @@ se_err se_jpeg_begin(se_jpeg *j, int width, int height, int quality,
     return j->failed ? SE_E_IO : SE_OK;
 }
 
-/* Encode the 8 rows currently held in j->strip. */
+/* Rec.601, level-shifted by -128. Cb and Cr are already signed. */
+static void yuv_of(const uint8_t *p, int *y, int *cb, int *cr)
+{
+    int r = p[0], g = p[1], b = p[2];
+    *y  = (( 19595 * r + 38470 * g +  7471 * b + 32768) >> 16) - 128;
+    *cb =  (-11056 * r - 21712 * g + 32768 * b + 32768) >> 16;
+    *cr =  ( 32768 * r - 27440 * g -  5328 * b + 32768) >> 16;
+}
+
+/* Encode the 8 rows currently held in j->strip as 16x8 MCUs. */
 static void encode_strip(se_jpeg *j)
 {
     int w = j->width;
-    int mcux, bx, by;
+    int mcu, by, col;
 
-    for (mcux = 0; mcux * 8 < w; mcux++) {
-        int32_t Y[64], Cb[64], Cr[64];
-        int x0 = mcux * 8;
+    for (mcu = 0; mcu * 16 < w; mcu++) {
+        int32_t Y0[64], Y1[64], Cb[64], Cr[64];
+        int x0 = mcu * 16;
+        int cb0 = 0, cr0 = 0;
 
         for (by = 0; by < 8; by++) {
             const uint8_t *src = j->strip + (size_t)by * w * 3;
-            for (bx = 0; bx < 8; bx++) {
-                int x = x0 + bx;
-                int r, g, b, o = by * 8 + bx;
-                if (x >= w) x = w - 1;           /* replicate the right edge */
-                r = src[x * 3 + 0];
-                g = src[x * 3 + 1];
-                b = src[x * 3 + 2];
-                /*
-                 * Rec.601 RGB -> YCbCr in Q16, already level-shifted by -128:
-                 * Y drops the +128 offset, and Cb/Cr are naturally signed.
-                 * The +32768 rounds instead of truncating; without it the
-                 * arithmetic shift biases every sample half a count low,
-                 * which costs real PSNR across the whole frame.
-                 */
-                Y [o] = (( 19595 * r + 38470 * g +  7471 * b + 32768) >> 16) - 128;
-                Cb[o] =  (-11056 * r - 21712 * g + 32768 * b + 32768) >> 16;
-                Cr[o] =  ( 32768 * r - 27440 * g -  5328 * b + 32768) >> 16;
+            for (col = 0; col < 16; col++) {
+                int x = x0 + col;
+                int y, cb, cr;
+                if (x >= w) x = w - 1;
+                yuv_of(src + x * 3, &y, &cb, &cr);
+                if (col < 8) Y0[by * 8 + col] = y;
+                else         Y1[by * 8 + col - 8] = y;
+                if ((col & 1) == 0) {
+                    cb0 = cb;
+                    cr0 = cr;
+                } else {
+                    int i = col >> 1;
+                    Cb[by * 8 + i] = (cb0 + cb) >> 1;
+                    Cr[by * 8 + i] = (cr0 + cr) >> 1;
+                }
             }
         }
 
-        encode_block(j, Y,  0, 0, g_dc_lum, g_ac_lum);
+        encode_block(j, Y0, 0, 0, g_dc_lum, g_ac_lum);
+        encode_block(j, Y1, 0, 0, g_dc_lum, g_ac_lum);
         encode_block(j, Cb, 1, 1, g_dc_chr, g_ac_chr);
         encode_block(j, Cr, 1, 2, g_dc_chr, g_ac_chr);
     }
@@ -630,7 +673,7 @@ se_err se_jpeg_write_rows(se_jpeg *j, const uint8_t *rgb, int nrows)
     for (i = 0; i < nrows; i++) {
         if (j->rows_done >= j->height) break;
         memcpy(j->strip + (size_t)j->strip_rows * j->width * 3,
-               rgb + (size_t)i * j->width * 3,
+               rgb + (size_t)i * (size_t)j->stride * 3,
                (size_t)j->width * 3);
         j->strip_rows++;
         j->rows_done++;
