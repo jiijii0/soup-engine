@@ -4,15 +4,16 @@
  * Two addresses outside this image are patched to call into it -- the init
  * task entry and the GUI event hook -- and neither must move when the
  * payload is recompiled. So everything the outside world needs lives in a
- * table at a fixed offset from 0x009D0000, and the patch tool reads the
- * table out of the built blob rather than guessing at symbol addresses.
+ * table at a fixed offset from the payload base (see the active platform's
+ * payload.ld), and the patch tool reads the table out of the built blob
+ * rather than guessing at symbol addresses.
  *
  * Several slots are dead now that Magic Lantern's menu is not used at all.
  * They are zeros rather than compacted: the offsets are a layout the patch
  * tool and the simulator both agree on, and renumbering them to save twelve
  * bytes is a way to get something subtly wrong.
  *
- * Offsets (from 0x009D0000):
+ * Offsets (from the payload base, 0x000CE000 on the 50D):
  *   0x00  magic 'FILM'
  *   0x04  b se_boot_start -- THE ENTRY POINT. mlstub's loader finishes with
  *         `add r0, r0, #4 ; blx r0`, so whatever is here is what runs after

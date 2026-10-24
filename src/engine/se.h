@@ -72,6 +72,10 @@ typedef void (*se_progress_fn)(void *ctx, const char *stage, int percent);
 void se_set_progress(se_progress_fn fn, void *ctx);
 void se_progress(const char *stage, int percent);
 
+/* Same callback, value is hundredths of a percent: 4371 means 43.71%. */
+void se_set_progress_fine(se_progress_fn fn, void *ctx);
+void se_progress_fine(const char *stage, int hundredths);
+
 /* ----------------------------------------------------------------- utils */
 #define SE_MIN(a, b) ((a) < (b) ? (a) : (b))
 #define SE_MAX(a, b) ((a) > (b) ? (a) : (b))

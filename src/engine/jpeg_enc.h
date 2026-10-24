@@ -1,7 +1,8 @@
 /*
  * jpeg_enc.h - baseline JPEG encoder, streaming and integer-only.
  *
- * Writes 4:4:4 baseline sequential JPEG. Rows are pushed in 8-line strips
+ * Writes 4:2:2 baseline sequential JPEG, the sampling the 50D playback
+ * decoder accepts. Rows are pushed in 8-line strips
  * so the encoder never holds more than one MCU row, which is what lets the
  * whole pipeline run in a band rather than a frame.
  *
@@ -33,6 +34,8 @@ typedef struct {
     float exposure_time;     /* seconds; 0 to omit */
     float aperture;          /* f-number; 0 to omit */
     int   iso;               /* 0 to omit */
+    const uint8_t *thumb;    /* JPEG thumbnail, or NULL */
+    int   thumb_len;
 } se_jpeg_exif;
 
 typedef struct {
@@ -40,6 +43,7 @@ typedef struct {
     void        *ctx;
 
     int width, height;
+    int stride;          /* source row length; may be wider than width */
     int quality;
 
     uint8_t  qt[2][64];        /* natural order    */
@@ -62,7 +66,7 @@ typedef struct {
     uint8_t  out[4096];
     int      outpos;
 
-    uint8_t  exifbuf[1024];
+    uint8_t  exifbuf[8192];
 } se_jpeg;
 
 /*

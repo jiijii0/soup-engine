@@ -697,13 +697,19 @@ static se_err jd_run(const uint8_t *d, size_t len,
          * state and handed back as if it were fine.
          */
         if (bits.ioerr) return SE_E_IO;
-        se_progress("jpeg", my * 100 / (s->mcuy ? s->mcuy : 1));
+        {
+            int den = s->mcuy ? s->mcuy : 1;
+            int fine = my * 10000 / den;
+            se_progress("jpeg", fine / 100);
+            se_progress_fine("jpeg", fine);
+        }
     }
 
     if (bits.ioerr) return SE_E_IO;
     /* the delivered size, not the coded one -- see jpeg_dec.h */
     if (info) { info->width = s->ow; info->height = s->oh; info->ncomp = s->ncomp; }
     se_progress("jpeg", 100);
+    se_progress_fine("jpeg", 10000);
     (void)jd_ycc_row;
     return SE_OK;
 }

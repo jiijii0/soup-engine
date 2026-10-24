@@ -1,5 +1,5 @@
 /*
- * cam.h - the 5D Classic's firmware, as seen from the payload.
+ * cam.h - the EOS 50D firmware 1.0.9, as seen from the payload.
  *
  * The payload is a freestanding blob: it does not link against Magic Lantern
  * and does not use its stubs. It calls Canon's own ROM functions by absolute
@@ -25,21 +25,26 @@
 #include <stdint.h>
 #include <stddef.h>
 
+/*
+ * ROM entry points. Each one is a veneer in the pinned 50D.109 autoexec
+ * (the `ldr pc` table around 0x9CA00) and the same address in
+ * platform/50D.109/stubs.S. The two lists agree; the veneer is the one
+ * this binary actually calls.
+ */
 /* ------------------------------------------------------------- ROM: memory */
-#define CAM_AllocateMemory      0xFFB2F664
-#define CAM_FreeMemory          0xFFB2F680
-#define CAM_GetMemoryInformation 0xFFB2F750
-#define CAM_memcpy              0xFFB44664
+#define CAM_AllocateMemory       0xFF867B54
+#define CAM_FreeMemory           0xFF867D18
+#define CAM_GetMemoryInformation 0xFF8680C8
 
 /* --------------------------------------------------------------- ROM: file */
-#define CAM_FIO_OpenFile        0xFFAE5B1C
-#define CAM_FIO_CreateFile      0xFFAE5B2C
-#define CAM_FIO_RemoveFile      0xFFAE5B3C
-#define CAM_FIO_ReadFile        0xFFAE5B54
-#define CAM_FIO_SeekFile        0xFFAE5B60
-#define CAM_FIO_WriteFile       0xFFAE5B6C
-#define CAM_FIO_CloseFile       0xFFAE5B78
-#define CAM_FIO_GetFileSize     0xFFAE5B90
+#define CAM_FIO_OpenFile        0xFF982434
+#define CAM_FIO_CreateFile      0xFF9824E8
+#define CAM_FIO_RemoveFile      0xFF982704
+#define CAM_FIO_ReadFile        0xFF982820
+#define CAM_FIO_SeekSkipFile    0xFF9828D0
+#define CAM_FIO_WriteFile       0xFF9829D0
+#define CAM_FIO_CloseFile       0xFF982590
+#define CAM_FIO_GetFileSize     0xFF982B84
 /*
  * The Find family, read out of the ROM rather than taken from the port's
  * stubs.S, which has FindNextEx wrong: the address it gives (0xFFB4720C) is
@@ -53,9 +58,9 @@
  * 0xFFAE6018  FindNextEx(cookie, file)  readdir into file; 0 on success.
  * 0xFFAE6070  FindClose(cookie)         closedir and free.
  */
-#define CAM_FIO_FindFirstEx     0xFFAE5F8C
-#define CAM_FIO_FindNextEx      0xFFAE6018
-#define CAM_FIO_FindClose       0xFFAE6070
+#define CAM_FIO_FindFirstEx     0xFF983474
+#define CAM_FIO_FindNextEx      0xFF9835A0
+#define CAM_FIO_FindClose       0xFF9836A0
 
 /* ------------------------------------------------- Canon's imaging pipeline */
 /*
@@ -98,16 +103,22 @@
  * the first capture -- and following it would fault and take the task with
  * it, which is the one way a read-only probe can still cost something.
  */
+/* DryOS alias. Live-view buffers in the 50D consts are 0x41xxxxxx. */
+#define CAM_UNCACHED_BIT  0x40000000u
+#define CAM_UNCACHED(p)   ((void *)((uintptr_t)(p) | CAM_UNCACHED_BIT))
+#define CAM_CACHED(p)     ((void *)((uintptr_t)(p) & ~(uintptr_t)CAM_UNCACHED_BIT))
+
 /* Is this a pointer to a string inside ML's image? Camera-specific, so the
  * simulator -- whose strings are host pointers -- answers differently. */
 static inline int cam_mlstr_ok(uintptr_t p)
 {
-    return p >= 0x00980000 && p < 0x009B5000;
+    return p >= 0x0004B000 && p < 0x000FE000;
 }
 
 static inline int cam_ram_ptr_ok(uintptr_t p)
 {
-    return p >= 0x00001000 && p < 0x10000000 && (p & 3) == 0;
+    uintptr_t a = p & ~(uintptr_t)CAM_UNCACHED_BIT;
+    return a >= 0x00001000 && a < 0x20000000 && (p & 3) == 0;
 }
 
 /* ----------------------------------------------------------- ROM: display */
@@ -187,9 +198,33 @@ static inline int cam_ram_ptr_ok(uintptr_t p)
  * 0xFF8190D0 shuffles its arguments and tail-calls 0xFF817500:
  *     mov ip, r1 ; mov r3, r2 ; mov r1, r0 ; mov r2, ip ; mov r0, #0
  */
-#define CAM_GUI_Control     0xFF8190D0
-#define SE_BGMT_MENU        3
+#define CAM_GUI_Control     0xFF822AB4
+#define CAM_EngDrvOut       0xFF97D794
+/* BGMT_MENU from platform/50D.109/gui.h. FAKE_BTN is ML's own sentinel. */
+#define SE_BGMT_MENU        5
 #define SE_FAKE_BTN         (-123456)
+
+/* Button codes as event->param reaches the GUI task (platform/50D.109/gui.h).
+ * Both dials are accepted: the top dial is WHEEL_UP/DOWN and the rear dial
+ * is WHEEL_LEFT/RIGHT. */
+#define SE_BTN_WHEEL_UP     0x00
+#define SE_BTN_WHEEL_DOWN   0x01
+#define SE_BTN_WHEEL_LEFT   0x02
+#define SE_BTN_WHEEL_RIGHT  0x03
+#define SE_BTN_SET          0x04
+#define SE_BTN_MENU         0x05
+#define SE_BTN_INFO         0x06
+#define SE_BTN_PLAY         0x08
+#define SE_BTN_TRASH        0x09
+#define SE_BTN_UNPRESS_UDLR 0x15
+#define SE_BTN_UP           0x16
+#define SE_BTN_UP_RIGHT     0x17
+#define SE_BTN_UP_LEFT      0x18
+#define SE_BTN_RIGHT        0x19
+#define SE_BTN_LEFT         0x1A
+#define SE_BTN_DOWN_RIGHT   0x1B
+#define SE_BTN_DOWN_LEFT    0x1C
+#define SE_BTN_DOWN         0x1D
 
 /*
  * ShowBitmap / HideBitmap -- '[DispCon] ShowBitmap (PUB)' at 0xFFB097CC.
@@ -229,9 +264,10 @@ static inline int cam_ram_ptr_ok(uintptr_t p)
 #define CAM_BmpDDev_give    0xFFB09EA8
 
 /* --------------------------------------------------------------- ROM: misc */
-#define CAM_msleep              0xFFB187F4
-#define CAM_task_create         0xFFB18B40   /* (name, prio, stack, entry, arg) */
-#define CAM_tickGet             0xFFB58DE4   /* VxWorks ticks; 100 Hz here    */
+#define CAM_msleep              0xFF866E08
+#define CAM_task_create         0xFF866EBC   /* (name, prio, stack, entry, arg) */
+/* This build's millisecond clock. Not a ROM tick; the 50D stubs have none. */
+#define CAM_tickGet             0x00078B18
 
 /* ----------------------------------------------------------------- ML code */
 #define ML_bmp_printf           0x0098110C   /* (fontspec, x, y, fmt, ...) */
@@ -287,7 +323,14 @@ static inline int  cam_read (int h, void *buf, size_t n) { return CAM_CALL3(CAM_
 static inline int  cam_write(int h, const void *b, size_t n) { return CAM_CALL3(CAM_FIO_WriteFile, int, h, b, n); }
 static inline void cam_close(int h) { CAM_CALL1(CAM_FIO_CloseFile, void, h); }
 static inline void cam_remove(const char *p) { CAM_CALL1(CAM_FIO_RemoveFile, void, p); }
-static inline int  cam_seek (int h, int pos, int whence) { return CAM_CALL3(CAM_FIO_SeekFile, int, h, pos, whence); }
+/* FIO_SeekSkipFile takes the offset as int64. A three-register call would
+ * put `whence` in the high half of the offset. */
+static inline int cam_seek(int h, int pos, int whence)
+{
+    typedef int64_t (*seek_fn)(int, int64_t, int);
+    int64_t r = ((seek_fn)CAM_FIO_SeekSkipFile)(h, (int64_t)pos, whence);
+    return (r < 0) ? -1 : 0;
+}
 
 static inline void cam_msleep(int ms) { CAM_CALL1(CAM_msleep, void, ms); }
 
@@ -306,37 +349,20 @@ static inline void cam_msleep(int ms) { CAM_CALL1(CAM_msleep, void, ms); }
  * cache line that survived from the previous refill, and from that byte on
  * the entropy decoder is reading someone else's bits.
  *
- * 0x10000000 is the alias bit on this body, from two independent places:
- * Magic Lantern's mem.h defines UNCACHEABLE as | 0x10000000 under
- * CONFIG_VXWORKS, and the camera logged its BMP buffer pointer as
- * 0x1058919C, which is 0x0058919C with that bit set -- the overlay is
- * DMA-written too, so Canon hands it out uncached for the same reason.
+ * 0x40000000 is the DryOS alias bit. Magic Lantern's mem.h ORs it on under
+ * every camera that is not VxWorks, and the 50D live-view buffers are
+ * published at 0x41xxxxxx, which is that bit set.
  *
  * Magic Lantern wraps its own FIO buffers in UNCACHEABLE(), so this is not
  * a theory about the hardware; it is what the port already does.
  */
-#define CAM_UNCACHED_BIT  0x10000000u
-#define CAM_UNCACHED(p)   ((void *)((uintptr_t)(p) | CAM_UNCACHED_BIT))
-#define CAM_CACHED(p)     ((void *)((uintptr_t)(p) & ~(uintptr_t)CAM_UNCACHED_BIT))
-
 /*
  * Copy out of a DMA-written buffer, reading it only through the uncached
  * alias.
  *
- * The first attempt at this refreshed the buffer in place -- read it
- * uncached, write it back cached -- which fixed most of the corruption and
- * not all of it, because it leaves the buffer covered by *dirty* cache
- * lines. A dirty line evicted at any later moment writes its stale contents
- * back over main memory, and if that happens after the next DMA has landed
- * there, it silently undoes it. That is a race with no bound on when it
- * fires, which is exactly the shape of what came back: nearly right, a
- * little wrong, different every time.
- *
- * So the DMA buffer is never written through its cached address at all, and
- * therefore never has a dirty line to evict. It is read only through the
- * alias, and the bytes are delivered into the caller's buffer, which DMA
- * never touches. Each side is then accessed one way only and there is
- * nothing left to be incoherent about.
+ * The DMA buffer is never written through its cached address. It is read
+ * only through the alias, and the bytes are delivered into the caller's
+ * buffer, which DMA never touches.
  */
 static inline void cam_copy_uncached(void *dst, const void *src, int n)
 {
@@ -367,20 +393,46 @@ static inline void cam_copy_uncached(void *dst, const void *src, int n)
 static inline int cam_imgbuf_ptr_ok(uintptr_t p)
 {
     uintptr_t a = p & ~(uintptr_t)CAM_UNCACHED_BIT;
-    return a >= 0x00001000 && a < 0x10000000 && (p & 3) == 0;
+    return a >= 0x00001000 && a < 0x20000000 && (p & 3) == 0;
 }
 
-/* Canon's own memcpy. Used for the one bulk write this payload makes to a
- * hardware address, which is the same call ML's bmp_idle_copy makes to the
- * same buffer. */
+/* A local copy. The 50D build reaches Canon's memcpy through a veneer we
+ * do not need: the overlay is written through the pointer Canon published,
+ * which is already the uncached view when DMA owns it. */
 static inline void cam_memcpy(volatile void *dst, const void *src, size_t n)
 {
-    CAM_CALL3(CAM_memcpy, void *, dst, src, n);
+    volatile uint8_t *d = (volatile uint8_t *)dst;
+    const uint8_t *s = (const uint8_t *)src;
+    size_t i;
+    for (i = 0; i < n; i++) d[i] = s[i];
 }
 
 /* ML's image: the overlay, the fonts and the Debug entry list. */
 #include "mlmap.h"
 
+/*
+ * bmp_vram_real(), transcribed from this autoexec.
+ *
+ * It loads bmp_vram_info[1].vram2 and, when the low 12 bits are one of the
+ * shapes BMP_VRAM_START knows, returns the 720x480 crop (inset 0x70F8 into
+ * the 960-wide buffer). An unrecognised pointer is returned unchanged so a
+ * bad guess is not added on top of it.
+ */
+static inline uintptr_t cam_overlay_ptr(void)
+{
+    uintptr_t raw = (uintptr_t)MEM(CAM_bmp_vram_raw);
+    uintptr_t low = raw & 0xFFFu;
+    uintptr_t base = raw;
+
+    if (low == 0x100u)      base = raw - 0x70F8u;
+    else if (low == 0x008u) base = raw;
+    else if (low == 0x108u) base = raw - 0x7100u;
+    else if (low == 0x4C8u) base = raw - 0x74C0u;
+    else if (low == 0x4C0u) base = raw - 0x74B8u;
+    else if (low == 0xC28u) base = raw - 0x7C20u;
+    else                    return raw;
+    return base + 0x70F8u;
+}
 
 /* ------------------------------------------------------------------ screen */
 /*
@@ -466,10 +518,10 @@ static inline int cam_panel_ptr_ok(uintptr_t p)
      * version of this check called that nonsense and refused it; it is
      * 0x0058919C with the alias bit set. Range-check the real address.
      */
-    uintptr_t a = (uintptr_t)CAM_CACHED(p);
+    uintptr_t a = (uintptr_t)CAM_CACHED((void *)p);
     if (!a || (a & 3)) return 0;
-    if (a >= 0x02000000) return 0;
-    if (a >= 0x00980000 && a < 0x00A00000) return 0;   /* ML's and ours */
+    if (a < 0x1000 || a >= 0x20000000) return 0;
+    if (a >= 0x0004B000 && a < 0x000FE000) return 0;   /* ML's and ours */
     return 1;
 }
 

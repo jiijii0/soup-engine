@@ -1,5 +1,10 @@
 # Soup Engine
 
+# Which camera body the payload and simulator target. Platform headers and
+# patch constants live under ml/platforms/$(PLATFORM)/.
+PLATFORM ?= 50D.109
+PLATDIR  = ml/platforms/$(PLATFORM)
+
 # Raw files to test against. They live in samples/fromJpeg and
 # samples/fromRaw now, grouped by which develop path suits them, so this
 # looks in both and keeps the old flat layout working. When the samples
@@ -37,7 +42,7 @@ test-full: all
 SDK := $(shell for s in MacOSX26.5.sdk MacOSX26.sdk MacOSX15.sdk; do \
                  p=/Library/Developer/CommandLineTools/SDKs/$$s; \
                  if [ -d $$p ]; then echo -isysroot $$p; break; fi; done)
-CAMTEST_CC = cc -std=c99 -O2 -DSE_HOSTED $(SDK) -Iengine -Iml/payload
+CAMTEST_CC = cc -std=c99 -O2 -DSE_HOSTED $(SDK) -I$(PLATDIR) -Iengine -Iml/payload
 
 test-camera:
 	@mkdir -p out
@@ -66,7 +71,7 @@ simtest: all
 	@# docs/HANDOFF.md section 6, still live in a second form. Now nothing
 	@# can be run unless this compile produced it.
 	@rm -f out/camsim
-	@cc -std=c99 -O1 -g -DSE_HOSTED $(SDK) -Itools/camsim -Iengine -o out/camsim \
+	@cc -std=c99 -O1 -g -DSE_HOSTED $(SDK) -Itools/camsim -I$(PLATDIR) -Iengine -o out/camsim \
 	   tools/camsim/camsim.c ml/payload/film.c \
 	   engine/se.c engine/wb.c engine/cr2.c engine/color.c engine/debayer.c engine/lut.c \
 	   engine/stock.c engine/grade.c engine/jpeg_enc.c engine/jpeg_dec.c \
@@ -101,11 +106,11 @@ out/previewcheck: $(PREVIEW_SRC) $(wildcard engine/*.h)
 	@$(CAMTEST_CC) -o $@ $(PREVIEW_SRC) -lm
 
 # The camera build. Produces two files for the card:
-#   ml/build/AUTOEXEC.BIN  the 2012 binary with 262 bytes changed, same size
+#   ml/build/AUTOEXEC.BIN  Magic Lantern for $(PLATFORM), loader and hook patched in
 #   ml/build/SE.BIN        the soup engine itself, loaded on demand
 payload:
-	@$(MAKE) -s -C ml/payload
-	@python3 tools/patch-film.py
+	@$(MAKE) -s -C ml/payload PLATFORM=$(PLATFORM)
+	@python3 tools/patch-film.py --platform $(PLATFORM)
 
 asan:
 	@$(MAKE) -s -C host asan

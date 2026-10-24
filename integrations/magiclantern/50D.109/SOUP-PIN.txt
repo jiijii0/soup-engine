@@ -1,0 +1,4 @@
+Pinned for the Soup Engine 50D Film menu.
+Commit ed3e7c0dfacfdeaf3349dee73edf9e3621217462
+(2025-06-20, 2025_release_01, magiclantern.2025-06-20.50D.109)
+https://github.com/reticulatedpines/magiclantern_simplified

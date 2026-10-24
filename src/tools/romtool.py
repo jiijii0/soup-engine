@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """
-romtool - read the 5D Classic's firmware the way this project needs to.
+romtool - read the camera firmware the way this project needs to.
 
-Two images, one address space:
+Two images, one address space (defaults for PLATFORM=50D.109):
 
-  rom/ROM1.BIN                    0xFF800000..0xFFFFFFFF   Canon's firmware
-  vendor/magiclantern-5Dc/        0x00980000..            Magic Lantern's
-    autoexec.bin                  relocated image, file offset 0x1000
+  rom/ROM1.BIN                    0xFF810000..             camera ROM
+  vendor/magiclantern-<body>/     relocated ML image
+    autoexec.bin                  (VA / file offset from platforms/*/patch.json)
+
+Set PLATFORM=5DC.111 (or another platforms/ name) to retarget Magic Lantern.
 
 Everything this project calls lives in one of those two, and every address
 it hardcodes should be justified by something here rather than by a table
@@ -34,12 +36,19 @@ work needed and what the old commands could not do:
                                         as a literal, named
   romtool.py fstart  0x00980BD0         the nearest prologue at or before
 """
-import os, re, struct, subprocess, sys
+import json, os, re, struct, subprocess, sys
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+PLATFORM = os.environ.get("PLATFORM", "50D.109")
+_plat = os.path.join(HERE, "ml", "platforms", PLATFORM, "patch.json")
+_cfg = json.load(open(_plat, "r", encoding="utf-8")) if os.path.isfile(_plat) else {
+    "vendor": "magiclantern-50D", "restart": "0x0004B000", "payload_off": "0x11C",
+}
 ROM  = os.path.join(HERE, "rom/ROM1.BIN")
-ML   = os.path.join(HERE, "vendor/magiclantern-5Dc/autoexec.bin")
-ROM_VA, ML_VA, ML_OFF = 0xFF800000, 0x00980000, 0x1000
+ML   = os.path.join(HERE, "vendor", _cfg["vendor"], "autoexec.bin")
+ROM_VA = 0xFF810000
+ML_VA  = int(_cfg["restart"], 0) if isinstance(_cfg["restart"], str) else _cfg["restart"]
+ML_OFF = int(_cfg["payload_off"], 0) if isinstance(_cfg["payload_off"], str) else _cfg["payload_off"]
 
 _rom = open(ROM, "rb").read() if os.path.exists(ROM) else b""
 _ml  = open(ML, "rb").read()  if os.path.exists(ML)  else b""

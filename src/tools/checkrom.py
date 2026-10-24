@@ -17,23 +17,26 @@ dump is aligned correctly and complete.
 """
 import sys, struct, collections, math, re, subprocess, os
 
-ROM_BASE = 0xFF800000
+ROM_BASE = 0xFF810000
 
-# A handful of stubs spread across the ROM, from
-# platform/5DC.111/stubs.S in the Magic Lantern tree.
+# Spread across the 50D 1.0.9 ROM. These are the veneer targets in the
+# 2025-06-20 Magic Lantern autoexec and the addresses in stubs.S.
 KNOWN = [
-    (0xFF810000, "firmware_entry / ROMBASEADDR"),
-    (0xFF8119D8, "startupPrepareDevelop"),
-    (0xFFAE5B1C, "_FIO_OpenFile"),
-    (0xFFAE5B2C, "_FIO_CreateFile"),
-    (0xFFAE5B6C, "FIO_WriteFile"),
-    (0xFFAE5B78, "FIO_CloseFile"),
-    (0xFFB18B40, "task_create"),
-    (0xFFB2F664, "AllocateMemory"),
-    (0xFFB44664, "memcpy"),
-    (0xFFB187F4, "msleep"),
-    (0xFFB4CB08, "malloc"),
-    (0xFFB09E84, "BmpDDev_take_semaphore"),
+    (0xFF810000, "firmware_entry"),
+    (0xFF810894, "cstart"),
+    (0xFF822AB4, "GUI_Control"),
+    (0xFF866E08, "msleep"),
+    (0xFF866EBC, "task_create"),
+    (0xFF867B54, "_AllocateMemory"),
+    (0xFF867D18, "_FreeMemory"),
+    (0xFF8680C8, "GetMemoryInformation"),
+    (0xFF982434, "_FIO_OpenFile"),
+    (0xFF9824E8, "_FIO_CreateFile"),
+    (0xFF982820, "_FIO_ReadFile"),
+    (0xFF9829D0, "_FIO_WriteFile"),
+    (0xFF982590, "FIO_CloseFile"),
+    (0xFF983474, "_FIO_FindFirstEx"),
+    (0xFF97D794, "_EngDrvOut"),
 ]
 
 def looks_like_code(w):
@@ -66,8 +69,8 @@ def main():
 
     print("%s" % path)
     print("  size            : %d bytes (0x%X)" % (len(d), len(d)))
-    if len(d) != 0x800000:
-        print("                    <- expected 8 MB (0x800000)")
+    if len(d) not in (0x800000, 0x7F0000):
+        print("                    <- expected 8 MB, or 0x7F0000 from 0xFF810000")
         problems += 1
 
     c = collections.Counter(d); n = len(d)

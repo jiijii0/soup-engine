@@ -2,9 +2,7 @@
  * libc.c - the six functions engine/se_libc.h declares, for the camera.
  *
  * The engine was written against a deliberately tiny libc surface so that
- * this file could stay small enough to audit. memcpy defers to Canon's ROM
- * implementation, which is word-at-a-time and considerably faster than
- * anything worth writing here; the rest are byte loops because they only
+ * this file could stay small enough to audit. memcpy is a word copy; the rest are byte loops because they only
  * ever see short strings.
  */
 #include <cam.h>
@@ -12,12 +10,18 @@
 
 void *memcpy(void *dst, const void *src, size_t n)
 {
-    /*
-     * Canon's memcpy does not document its behaviour for n == 0 and the
-     * engine does call it with zero-length bands at the bottom edge of a
-     * frame, so screen that case here rather than find out.
-     */
-    if (n) CAM_CALL3(CAM_memcpy, void, dst, src, n);
+    uint8_t *d = (uint8_t *)dst;
+    const uint8_t *s = (const uint8_t *)src;
+    if ((((uintptr_t)d | (uintptr_t)s) & 3u) == 0) {
+        uint32_t *dw = (uint32_t *)dst;
+        const uint32_t *sw = (const uint32_t *)src;
+        size_t w = n >> 2;
+        while (w--) *dw++ = *sw++;
+        d = (uint8_t *)dw;
+        s = (const uint8_t *)sw;
+        n &= 3u;
+    }
+    while (n--) *d++ = *s++;
     return dst;
 }
 
