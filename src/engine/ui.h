@@ -134,7 +134,7 @@ typedef enum {
  * Both develop one frame at a time, right after the shot. RESOLUTION
  * applies to both, as the output size.
  */
-enum { SE_SET_SOURCE = 0, SE_SET_RES, SE_SET_GRAIN, SE_SET_COUNT };
+enum { SE_SET_FORMAT = 0, SE_SET_SOURCE, SE_SET_RES, SE_SET_GRAIN, SE_SET_COUNT };
 
 enum { SE_SOURCE_PREVIEW = 0, SE_SOURCE_RAW };
 

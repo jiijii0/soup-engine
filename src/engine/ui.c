@@ -118,7 +118,7 @@ static const int   g_res_px[2][3] = { { 2496, 1248, 624 },
  */
 static const char *g_src_name[2] = { "JPEG", "RAW" };
 
-static const int g_set_max[SE_SET_COUNT] = { 1, 2, 1 };
+static const int g_set_max[SE_SET_COUNT] = { 1, 1, 1, 1 };
 
 /*
  * Settings are restored from a file on the card, so they are untrusted
@@ -139,7 +139,7 @@ int   se_ui_source(const se_ui *u)   { return setval(u, SE_SET_SOURCE); }
 
 static void setting_label(int i, char *dst)
 {
-    static const char *n[SE_SET_COUNT] = { "SOURCE", "RESOLUTION", "GRAIN" };
+    static const char *n[SE_SET_COUNT] = { "FORMAT", "SOURCE", "RESOLUTION", "GRAIN" };
     put_str(dst, (i >= 0 && i < SE_SET_COUNT) ? n[i] : "?");
 }
 
@@ -148,6 +148,9 @@ static void setting_value(const se_ui *u, int i, char *dst)
     char *d = dst;
     int   v = setval(u, i);
     switch (i) {
+    case SE_SET_FORMAT:
+        put_str(d, v ? "HALF-FRAME (3:4 DIPTYCH)" : "FULL-FRAME (3:2)");
+        break;
     case SE_SET_SOURCE:
         put_str(d, g_src_name[v]);
         break;
@@ -173,6 +176,7 @@ void se_ui_init(se_ui *u)
     memset(u, 0, sizeof *u);
     u->screen = SE_SCREEN_STOCK;
     u->stock  = 0;
+    u->value[SE_SET_FORMAT] = 1;   /* HALF-FRAME by default */
     u->value[SE_SET_SOURCE] = SE_SOURCE_PREVIEW;
     u->value[SE_SET_RES]    = 1;   /* HALF while we are testing */
     u->value[SE_SET_GRAIN]  = 1;
@@ -362,21 +366,25 @@ typedef struct { uint8_t accent; const char *iso; } se_stock_look;
  * stock someone drops on the card but not for one that ships.
  */
 static const struct { const char *key; se_stock_look lk; } g_looks[] = {
-    /* the Fujifilm simulations */
-    { "PROVIA",     { SE_C_SLATE,  "FILM SPEED 100" } },
-    { "VELVIA",     { SE_C_OLIVE,  "FILM SPEED 50"  } },
-    { "ASTIA",      { SE_C_PLUM,   "FILM SPEED 100" } },
-    { "CLASSIC CH", { SE_C_MID,    "FILM SPEED 200" } },
-    { "CLASSIC N",  { SE_C_TEAL,   "FILM SPEED 400" } },
-    { "NOSTALGIC",  { SE_C_RUST,   "FILM SPEED 400" } },
-    { "ETERNA",     { SE_C_EDGE,   "FILM SPEED 250" } },
-    { "BLEACH",     { SE_C_SHADOW, "FILM SPEED 400" } },
-    { "ACROS",      { SE_C_INK,    "FILM SPEED 100" } },
-    { "REALA",      { SE_C_HILITE, "FILM SPEED 100" } },
-    /* and the few that are not Fuji */
-    { "SOUP 800",   { SE_C_RED,    "FILM SPEED 800" } },
-    { "GOLD",       { SE_C_GOLD,   "FILM SPEED 200" } },
-    { "PORTRA",     { SE_C_AMBER,  "FILM SPEED 400" } },
+    { "PROVIA",         { SE_C_SLATE,  "FILM SPEED 100" } },
+    { "VELVIA",         { SE_C_OLIVE,  "FILM SPEED 50"  } },
+    { "ASTIA",          { SE_C_PLUM,   "FILM SPEED 100" } },
+    { "CLASSIC CH",     { SE_C_MID,    "FILM SPEED 200" } },
+    { "CLASSIC N",      { SE_C_TEAL,   "FILM SPEED 400" } },
+    { "NOSTALGIC",      { SE_C_RUST,   "FILM SPEED 400" } },
+    { "ETERNA",         { SE_C_EDGE,   "FILM SPEED 250" } },
+    { "BLEACH",         { SE_C_SHADOW, "FILM SPEED 400" } },
+    { "ACROS",          { SE_C_INK,    "FILM SPEED 100" } },
+    { "REALA",          { SE_C_HILITE, "FILM SPEED 100" } },
+    { "SOUP 800",       { SE_C_RED,    "FILM SPEED 800" } },
+    { "GOLD",           { SE_C_GOLD,   "FILM SPEED 200" } },
+    { "PORTRA",         { SE_C_AMBER,  "FILM SPEED 400" } },
+    { "HP5",            { SE_C_INK,    "FILM SPEED 400" } },
+    { "FP4",            { SE_C_SLATE,  "FILM SPEED 125" } },
+    { "TRI-X",          { SE_C_INK,    "FILM SPEED 400" } },
+    { "EKTAR",          { SE_C_RED,    "FILM SPEED 100" } },
+    { "RED_FILTER",     { SE_C_RED,    "CONTRAST FILTER" } },
+    { "HIGH_KEY",       { SE_C_HILITE, "MATTE MONO" } },
 };
 #define SE_NLOOKS ((int)(sizeof g_looks / sizeof g_looks[0]))
 
@@ -401,40 +409,25 @@ static se_stock_look stock_look(const char *name)
 
 
 /* ------------------------------------------------------- stock icons */
-/*
- * A small piece of pixel art beside each film's name.
- *
- * Twelve by twelve, written as text so it can be read and edited as a
- * picture rather than as hex. '#' is drawn in the name's ink, '+' in the
- * stock's own accent colour, '.' is left alone.
- *
- * Each art pixel is drawn TWICE AS WIDE as it is tall, because the
- * overlay is a 720x240 buffer presented over 480 lines -- so a square in
- * memory is a rectangle on the panel, and only a 2:1 block comes out
- * square to the eye. The font scales already do this (3,2 and 7,4); this
- * is the same correction.
- */
+
 #define SE_ICON_N 12
 
 typedef const char *se_icon[SE_ICON_N];
 
-/* the aperture ring: the neutral one, and the fallback for any stock
- * dropped on the card that this file has never heard of */
-static const se_icon ic_iris = {
-    "...######...",
-    "..#++++++#..",
-    ".#++####++#.",
-    "#++##..##++#",
-    "#++#....#++#",
-    "#++#....#++#",
-    "#++#....#++#",
-    "#++#....#++#",
-    "#++##..##++#",
-    ".#++####++#.",
-    "..#++++++#..",
-    "...######..." };
+static const se_icon ic_canister = {
+    "  ########  ",
+    "    ####    ",
+    "  ########  ",
+    "  #      #  ",
+    "  # #### #  ",
+    "  # #### #  ",
+    "  #      ###",
+    "  #      ###",
+    "  #      #  ",
+    "  ########  ",
+    "    ####    ",
+    "    ####    " };
 
-/* VELVIA: mountains. Landscape film, and the most saturated thing here */
 static const se_icon ic_peaks = {
     "............",
     "............",
@@ -449,127 +442,6 @@ static const se_icon ic_peaks = {
     "############",
     "............" };
 
-/* ASTIA and PORTRA: a head and shoulders. The films made for people */
-static const se_icon ic_bust = {
-    "....####....",
-    "...#++++#...",
-    "..#++++++#..",
-    "..#++++++#..",
-    "...#++++#...",
-    "....####....",
-    "....####....",
-    "..##++++##..",
-    ".#++++++++#.",
-    "#++++++++++#",
-    "#++++++++++#",
-    "#++++++++++#" };
-
-/* CLASSIC CHROME: a camera, because it is the documentary one */
-static const se_icon ic_camera = {
-    "............",
-    "....####....",
-    "..##++++##..",
-    "############",
-    "#++##++##++#",
-    "#+#++++++#+#",
-    "#+#++##++#+#",
-    "#+#++++++#+#",
-    "#++##++##++#",
-    "############",
-    "............",
-    "............" };
-
-/* CLASSIC NEG and NOSTALGIC NEG: a strip of negative with sprockets */
-static const se_icon ic_strip = {
-    "############",
-    "#..##..##..#",
-    "#..##..##..#",
-    "############",
-    "#++++++++++#",
-    "#++++++++++#",
-    "#++++++++++#",
-    "#++++++++++#",
-    "############",
-    "#..##..##..#",
-    "#..##..##..#",
-    "############" };
-
-/* ETERNA: a clapperboard. Motion picture stock */
-static const se_icon ic_clap = {
-    "............",
-    ".##.##.##.#.",
-    ".#.##.##.##.",
-    ".##########.",
-    ".#++++++++#.",
-    ".#++++++++#.",
-    ".#++++++++#.",
-    ".#++++++++#.",
-    ".#++++++++#.",
-    ".##########.",
-    "............",
-    "............" };
-
-/* BLEACH BYPASS: a contrast wedge, black at one end and open at the other */
-static const se_icon ic_wedge = {
-    "############",
-    "#..........#",
-    "#+.........#",
-    "#++........#",
-    "#+++.......#",
-    "#++++......#",
-    "#+++++.....#",
-    "#++++++....#",
-    "#+++++++...#",
-    "#++++++++..#",
-    "#+++++++++.#",
-    "############" };
-
-/* ACROS: a disc split down the middle. Black and white, literally */
-static const se_icon ic_half = {
-    "...######...",
-    "..##++..##..",
-    ".##+++....#.",
-    "##+++++....#",
-    "#++++++.....",
-    "#++++++.....",
-    "#++++++.....",
-    "#++++++.....",
-    "##+++++....#",
-    ".##+++....#.",
-    "..##++..##..",
-    "...######..." };
-
-/* REALA ACE: a colour chart. The one that tries to be accurate */
-static const se_icon ic_chart = {
-    "############",
-    "#++##++##++#",
-    "#++##++##++#",
-    "############",
-    "#++##++##++#",
-    "#++##++##++#",
-    "############",
-    "#++##++##++#",
-    "#++##++##++#",
-    "############",
-    "............",
-    "............" };
-
-/* SOUP 800: a street light, haloed. The whole reason it exists */
-static const se_icon ic_lamp = {
-    ".....++.....",
-    "....+##+....",
-    "...+####+...",
-    "..+##....##+",
-    "..+##....##+",
-    "...+####+...",
-    ".....##.....",
-    ".....##.....",
-    ".....##.....",
-    ".....##.....",
-    "..########..",
-    "............" };
-
-/* GOLD: the sun, for golden hour in a box */
 static const se_icon ic_sun = {
     "..#..##..#..",
     "...#.##.#...",
@@ -584,27 +456,113 @@ static const se_icon ic_sun = {
     "...#.##.#...",
     "..#..##..#.." };
 
+static const se_icon ic_crescent = {
+    "     #####  ",
+    "   ###   ## ",
+    "  ##      # ",
+    " ##     #   ",
+    " ##    ###  ",
+    " ##     #   ",
+    " ##         ",
+    "  ##        ",
+    "   ###   ## ",
+    "     #####  ",
+    "       ##   ",
+    "            " };
+
+static const se_icon ic_mountain = {
+    "     ##     ",
+    "    ####    ",
+    "   ######   ",
+    "   ##  ##   ",
+    "  ########  ",
+    "  ###  ###  ",
+    " ########## ",
+    " ########## ",
+    "############",
+    "############",
+    "            ",
+    "            " };
+
+static const se_icon ic_trix = {
+    "###      ###",
+    "####    ####",
+    " ####  #### ",
+    "  ########  ",
+    "   ######   ",
+    "    ####    ",
+    "    ####    ",
+    "   ######   ",
+    "  ########  ",
+    " ####  #### ",
+    "####    ####",
+    "###      ###" };
+
+static const se_icon ic_halide = {
+    "      ###   ",
+    "     ####   ",
+    "    ####    ",
+    "   ####     ",
+    "  ##########",
+    "  ##########",
+    "     ####   ",
+    "    ####    ",
+    "   ####     ",
+    "  ####      ",
+    " ###        ",
+    " ##         " };
+
+static const se_icon ic_filter = {
+    "   ######   ",
+    "  ########  ",
+    " ##  ##  ## ",
+    " ## #### ## ",
+    "##  ####  ##",
+    "## ###### ##",
+    "## ###### ##",
+    "##  ####  ##",
+    " ## #### ## ",
+    " ##  ##  ## ",
+    "  ########  ",
+    "   ######   " };
+
+static const se_icon ic_high_key = {
+    "############",
+    "##        ##",
+    "#          #",
+    "#   ####   #",
+    "   ######   ",
+    "   ######   ",
+    "   ######   ",
+    "   ######   ",
+    "#   ####   #",
+    "#          #",
+    "##        ##",
+    "############" };
+
 static const char *const *stock_icon(const char *name)
 {
     static const struct { const char *key; const se_icon *art; } t[] = {
-        { "VELVIA",     &ic_peaks  },
-        { "ASTIA",      &ic_bust   },
-        { "PORTRA",     &ic_bust   },
-        { "CLASSIC CH", &ic_camera },
-        { "CLASSIC N",  &ic_strip  },
-        { "NOSTALGIC",  &ic_strip  },
-        { "ETERNA",     &ic_clap   },
-        { "BLEACH",     &ic_wedge  },
-        { "ACROS",      &ic_half   },
-        { "REALA",      &ic_chart  },
-        { "SOUP 800",   &ic_lamp   },
-        { "GOLD",       &ic_sun    },
+        { "VELVIA",     &ic_peaks    },
+        { "PROVIA",     &ic_peaks    },
+        { "PORTRA",     &ic_sun      },
+        { "GOLD",       &ic_sun      },
+        { "EKTAR",      &ic_sun      },
+        { "HP5",        &ic_crescent },
+        { "FP4",        &ic_crescent },
+        { "ACROS",      &ic_mountain },
+        { "TRI-X",      &ic_trix     },
+        { "TRIX",       &ic_trix     },
+        { "CINE",       &ic_halide   },
+        { "800T",       &ic_halide   },
+        { "RED_FILTER", &ic_filter   },
+        { "HIGH_KEY",   &ic_high_key },
     };
     int i;
     if (name)
         for (i = 0; i < (int)(sizeof t / sizeof t[0]); i++)
             if (name_is(name, t[i].key)) return *t[i].art;
-    return ic_iris;            /* PROVIA, and anything unrecognised */
+    return ic_canister;
 }
 
 static void draw_icon(se_ui_fb *fb, int x, int y, const char *const *art,
@@ -614,9 +572,9 @@ static void draw_icon(se_ui_fb *fb, int x, int y, const char *const *art,
     for (r = 0; r < SE_ICON_N; r++) {
         const char *row = art[r];
         for (c = 0; c < SE_ICON_N && row[c]; c++) {
-            if (row[c] == '.') continue;
+            if (row[c] == '.' || row[c] == ' ') continue;
             se_ui_fill(fb, x + c * s * 2, y + r * s, s * 2, s,
-                       row[c] == '+' ? accent : ink);
+                       (row[c] == '+' || row[c] == '#') ? accent : ink);
         }
     }
 }
@@ -662,7 +620,7 @@ static void draw_stock(const se_ui *u, se_ui_fb *fb)
     d = put_int(d, cur + 1);
     d = put_str(d, " OF ");
     put_int(d, n);
-    header(fb, "SOUP", buf);
+    header(fb, u->value[SE_SET_FORMAT] ? "SOUP  [HALF-FRAME]" : "SOUP  [FULL-FRAME]", buf);
 
     /*
      * Arrows at the margins, and nothing else.
@@ -751,25 +709,26 @@ static void draw_stock(const se_ui *u, se_ui_fb *fb)
         se_ui_text(fb, x + lw, 194, val,        SE_C_INK, 2, 1);
     }
 
-    /*
-     * What the body actually does, not what se_ui_key_press does. The
-     * camera never routes buttons through this state machine -- se_key in
-     * the payload calls se_next_stock and se_toggle_source directly -- so
-     * this line names the camera's controls.
-     */
-    footer(fb, "\x01\x02 SOURCE    SET CHOOSE    DEL CLOSE");
+    /* If batch development confirmation dialog is pending, draw dedicated modal plate */
+    if (u->file[0]) {
+        plate(fb, 40, 126, SE_UI_W - 80, 76, SE_C_PAPER, SE_C_AMBER, SE_C_PAPER);
+        se_ui_text_c(fb, SE_UI_W / 2, 134, "ROLL DEVELOPMENT LAB", SE_C_AMBER, 3, 2);
+        se_ui_text_c(fb, SE_UI_W / 2, 162, u->file, SE_C_INK, 2, 1);
+        footer(fb, "SET START DEVELOP    JUMP TOGGLE MODE    DEL CANCEL");
+        return;
+    }
+
+    footer(fb, "WHEEL STOCK    INFO SETTINGS    PLAY DEV ROLL    SET CHOOSE");
 }
 
 static void draw_settings(const se_ui *u, se_ui_fb *fb)
 {
     int i, cur;
-    const int row_y = 48, row_h = 42;
+    const int row_y = 48, row_h = 36;
 
     paper_ground(fb);
     header(fb, "SETTINGS", NULL);
 
-    /* clamp for display: an out-of-range value must still show a selected
-     * row rather than silently highlighting nothing */
     cur = SE_CLAMP(u->setting, 0, SE_SET_COUNT - 1);
 
     for (i = 0; i < SE_SET_COUNT; i++) {
@@ -780,27 +739,25 @@ static void draw_settings(const se_ui *u, se_ui_fb *fb)
         setting_label(i, label);
         setting_value(u, i, value);
 
-        /* the selected row is marked by a bar and by weight, not by a
-         * filled block -- reversed type is harder to read, and this screen
-         * is nothing but reading */
-        if (sel) se_ui_fill(fb, 16, y - 6, 6, 28, SE_C_AMBER);
+        if (sel) se_ui_fill(fb, 16, y - 4, 6, 24, SE_C_AMBER);
         se_ui_text(fb, 36, y, label, sel ? SE_C_INK : SE_C_MID, 3, 2);
         se_ui_text(fb, SE_UI_W - 36 - se_ui_text_w(value, 2), y + 4,
                    value, sel ? SE_C_INK : SE_C_MID, 2, 1);
         if (i < SE_SET_COUNT - 1)
-            se_ui_fill(fb, 36, y + row_h - 16, SE_UI_W - 72, 1, SE_C_EDGE);
+            se_ui_fill(fb, 36, y + row_h - 12, SE_UI_W - 72, 1, SE_C_EDGE);
     }
 
     {
         static const char *help[SE_SET_COUNT] = {
-            "SECONDS AND CANON S COLOUR, OR MINUTES AND OURS",
-            "OUTPUT SIZE OF THE DEVELOPED JPEG",
-            "EACH STOCK CARRIES ITS OWN GRAIN - THIS TURNS IT OFF"
+            "HALF-FRAME 3:4 DIPTYCH OR FULL-FRAME 3:2 NATIVE",
+            "PREVIEW JPEG (FAST) OR RAW SENSOR (12.8 MP)",
+            "OUTPUT RESOLUTION OF DEVELOPED FRAMES",
+            "ANALOG FILM GRAIN - SET OFF FOR CLEAN SENSOR"
         };
-        se_ui_text_c(fb, SE_UI_W / 2, 190, help[cur], SE_C_SLATE, 2, 1);
+        se_ui_text_c(fb, SE_UI_W / 2, 194, help[cur], SE_C_SLATE, 2, 1);
     }
 
-    footer(fb, "\x01\x02 CHANGE    MENU BACK");
+    footer(fb, "\x01\x02 CHANGE    INFO/MENU BACK");
 }
 
 static void draw_working(const se_ui *u, se_ui_fb *fb)
@@ -828,12 +785,12 @@ static void draw_working(const se_ui *u, se_ui_fb *fb)
     if (filled > 0)
         se_ui_fill(fb, bar_x + 2, bar_y + 2, filled, bar_h - 4, SE_C_AMBER);
 
-    d = buf;
+  /*    d = buf;
     d = put_str(d, "FRAME ");
     d = put_int(d, u->done + 1);
     d = put_str(d, " OF ");
     put_int(d, u->total);
-    se_ui_text_c(fb, SE_UI_W / 2, 164, buf, SE_C_MID, 2, 1);
+    se_ui_text_c(fb, SE_UI_W / 2, 164, buf, SE_C_MID, 2, 1);   */
 
     d = buf;
     d = put_str(d, "SOURCE ");

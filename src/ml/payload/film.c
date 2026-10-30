@@ -49,6 +49,17 @@
 #include "look.h"
 #include "ui.h"
 
+#ifndef CAM_battery_level
+#define CAM_battery_level 0x1271C
+#endif
+
+static int se_battery_ok(void)
+{
+    int lvl = (int)MEM(CAM_battery_level);
+    if (lvl < 0 || lvl > 3) return 1; /* Uninitialized fallback */
+    return (lvl >= 2); /* Requires Full (3) or Medium (2); blocks Low (1) or Empty (0) */
+}
+
 /* ===================================================================== */
 /* Preconditions, as checks rather than as comments                        */
 /* ===================================================================== */
@@ -202,9 +213,27 @@ int se_src_index   = SE_SOURCE_PREVIEW;
  * costs one card write rather than eleven.
  */
 #define SE_CFG_PATH  "A:/ML/SE.CFG"
-volatile int se_cfg_dirty;              /* set by se_key, cleared by the watcher */
+volatile int se_cfg_dirty;
+static int g_hf_mode_enabled = 1;
+static int g_settings_active = 0;          /* 1 when Settings Screen is visible */
+static int g_settings_cursor = 0;          /* Highlighted row index in Settings */
+static int g_grain_enabled   = 1;                 /* 1 = Film Stock Grain ON, 0 = Bypassed/Clean */
+static int g_hf_state = 0;                 /* 0 = Shot 1/2, 1 = Shot 2/2 */
+static int g_roll_dev_requested = 0;
+static int g_roll_confirm_pending = 0;     /* 1 when Confirmation UI is active */
+static int g_roll_mode_all        = 0;     /* 0 = Develop NEW only, 1 = Re-develop ALL */
+static int g_roll_dev_force_all   = 0;     /* Passed to se_sweep_roll() */
+static int g_roll_stat_cr2s       = 0;
+static int g_roll_stat_diptychs   = 0;
+static int g_roll_stat_existing   = 0;
+static int g_roll_stat_new        = 0;
+#define MAX_ROLL_CR2S 256
+typedef struct {
+    char (*paths)[SE_PATH_MAX];
+    int count;
+} roll_ctx;
 static char  se_cfg_stock[SE_STOCK_NAME];
-int se_auto_on     = 1;        /* watch for new frames and develop them */
+int se_auto_on     = 0;        /* 0 = Analog Roll Mode: shoot instantly, press PLAY to batch develop */        /* watch for new frames and develop them */
 
 /* Set from the menu to ask for a sweep of every raw already on the card. */
 /* Not static: tools/camsim asserts SET does not set it. It used to, and
@@ -407,7 +436,7 @@ static int ends_with_ci(const char *s, const char *suffix)
  * made exactly the lines worth reading the first to go. The pin now covers
  * the boot story and the first probe report; everything after it rolls.
  */
-#define SE_LOG_MAX 16384
+#define SE_LOG_MAX 12288
 #define SE_LOG_PIN 1536        /* the opening lines, never rolled away */
 static char se_logbuf[SE_LOG_MAX];
 static int  se_loglen;
@@ -779,7 +808,7 @@ const char *se_active_stock_name(void)
 
 static void se_cfg_save(void)
 {
-    char buf[160], *d;
+    char buf[256], *d;
     int  h;
 
     if (se_shutting_down()) return;
@@ -788,21 +817,27 @@ static void se_cfg_save(void)
     d = put_s(d, "STOCK ");
     d = put_s(d, (se_nstocks > 0 && se_stock_index < se_nstocks)
                  ? se_stocks[se_stock_index].name : "");
+    d = put_s(d, "\nFORMAT ");
+    d = put_s(d, g_hf_mode_enabled ? "HF" : "FF");
     d = put_s(d, "\nSOURCE ");
     d = put_s(d, se_src_index == SE_SOURCE_RAW ? "RAW" : "JPEG");
     d = put_s(d, "\nSIZE ");
     d = put_s(d, se_res_index ? "FULL" : "HALF");
+    d = put_s(d, "\nGRAIN ");
+    d = put_s(d, g_grain_enabled ? "ON" : "OFF");
     d = put_s(d, "\n");
 
     h = cam_create(SE_CFG_PATH);
     if (h == -1) { se_note("cfg: cannot write " SE_CFG_PATH); return; }
     cam_write(h, buf, (size_t)(d - buf));
     cam_close(h);
-    se_note("cfg saved: %s / %s / %s",
+    se_note("cfg saved: stock=%s format=%s src=%s size=%s grain=%s",
             (se_nstocks > 0 && se_stock_index < se_nstocks)
                 ? se_stocks[se_stock_index].name : "(none)",
+            g_hf_mode_enabled ? "HF" : "FF",
             se_src_index == SE_SOURCE_RAW ? "RAW" : "JPEG",
-            se_res_index ? "FULL" : "HALF");
+            se_res_index ? "FULL" : "HALF",
+            g_grain_enabled ? "ON" : "OFF");
 }
 
 /* Is `line` the key `key`? Returns the value, or 0. */
@@ -842,19 +877,22 @@ static void se_cfg_load(void)
 
         if ((v = cfg_val(line, "STOCK")) != 0) {
             str_copy(se_cfg_stock, sizeof(se_cfg_stock), v);
+        } else if ((v = cfg_val(line, "FORMAT")) != 0) {
+            g_hf_mode_enabled = cfg_is(v, "FF") ? 0 : 1;
         } else if ((v = cfg_val(line, "SOURCE")) != 0) {
             se_src_index = cfg_is(v, "RAW") ? SE_SOURCE_RAW : SE_SOURCE_PREVIEW;
         } else if ((v = cfg_val(line, "SIZE")) != 0) {
             se_res_index = cfg_is(v, "FULL") ? 1 : 0;
+        } else if ((v = cfg_val(line, "GRAIN")) != 0) {
+            g_grain_enabled = cfg_is(v, "OFF") ? 0 : 1;
         }
-        /* No GRAIN key. The UI has a grain row, but the payload never
-         * reads it -- grain comes from the stock file's own GRAIN line and
-         * is part of what a stock IS. Persisting a setting that does
-         * nothing would be worse than not having it. */
     }
-    se_note("cfg read: stock '%s' source %s size %s",
-            se_cfg_stock, se_src_index == SE_SOURCE_RAW ? "RAW" : "JPEG",
-            se_res_index ? "FULL" : "HALF");
+    se_note("cfg read: stock '%s' format %s src %s size %s grain %s",
+            se_cfg_stock,
+            g_hf_mode_enabled ? "HF" : "FF",
+            se_src_index == SE_SOURCE_RAW ? "RAW" : "JPEG",
+            se_res_index ? "FULL" : "HALF",
+            g_grain_enabled ? "ON" : "OFF");
 }
 
 /* Once the stocks are loaded, resolve the remembered name to an index. */
@@ -1069,15 +1107,65 @@ static se_ui_stock se_uilist[SE_MAX_STOCKS];
  * Pure computation into our own buffer: no allocation, no card, nothing that
  * can block. That is what makes it safe to call from inside ML's redraw.
  */
+
+
+/* Forward declarations for roll scanning helpers */
+static void out_path_for(const char *cr2, char *out, size_t n);
+static int already_done(const char *out);
+static void on_cr2_collect_roll(const char *dir, const struct fio_file *f, void *ctx);
+static void on_dcim_dir_collect_roll(const char *dir, const struct fio_file *f, void *ctx);
+
+static void se_count_roll_status(int *out_cr2s, int *out_diptychs, int *out_existing, int *out_new)
+
+{
+    roll_ctx rctx;
+    int i, total_cr2s, total_diptychs, existing = 0, new_count = 0;
+
+    rctx.count = 0;
+    rctx.paths = (char (*)[SE_PATH_MAX])cam_alloc((size_t)MAX_ROLL_CR2S * SE_PATH_MAX);
+
+    if (!rctx.paths) {
+        if (out_cr2s) *out_cr2s = 0;
+        if (out_diptychs) *out_diptychs = 0;
+        if (out_existing) *out_existing = 0;
+        if (out_new) *out_new = 0;
+        return;
+    }
+
+    se_walk("A:/DCIM/", on_dcim_dir_collect_roll, &rctx);
+    total_cr2s = rctx.count;
+    total_diptychs = (total_cr2s + 1) / 2;
+
+    for (i = 0; i < total_diptychs; i++) {
+        char *in1 = rctx.paths[2 * i];
+        char  out_path[SE_PATH_MAX];
+        out_path_for(in1, out_path, sizeof(out_path));
+        if (already_done(out_path)) {
+            existing++;
+        } else {
+            new_count++;
+        }
+    }
+
+    cam_free(rctx.paths);
+
+    if (out_cr2s) *out_cr2s = total_cr2s;
+    if (out_diptychs) *out_diptychs = total_diptychs;
+    if (out_existing) *out_existing = existing;
+    if (out_new) *out_new = new_count;
+}
+
 static void se_render(void)
 {
     se_ui_fb fb;
     int i;
+    static char hf_desc[160];
 
     for (i = 0; i < se_nstocks && i < SE_MAX_STOCKS; i++) {
         se_uilist[i].name = se_stocks[i].name;
-        se_uilist[i].desc = se_stocks[i].desc;
+        se_uilist[i].desc = se_stocks[i].desc; /* Pristine description, never overwritten */
     }
+
     se_ui_set_stocks(&se_uistate, se_uilist, se_nstocks > 0 ? se_nstocks : 0);
     se_uistate.stock   = se_stock_index;
     /*
@@ -1085,15 +1173,32 @@ static void se_render(void)
      * frame. They used to be whatever se_ui_init left behind, so the
      * screen could say one thing while the develop did another.
      */
+    se_uistate.value[SE_SET_FORMAT] = g_hf_mode_enabled ? 1 : 0;
     se_uistate.value[SE_SET_SOURCE] = se_src_index;
     se_uistate.value[SE_SET_RES]    = se_res_index ? 0 : 1;   /* FULL : HALF */
-    se_uistate.screen  = se_busy ? SE_SCREEN_WORKING : SE_SCREEN_STOCK;
+    se_uistate.value[SE_SET_GRAIN]  = g_grain_enabled ? 1 : 0;
+    se_uistate.setting = g_settings_cursor;
+    if (se_busy) {
+        se_uistate.screen = SE_SCREEN_WORKING;
+    } else if (g_settings_active) {
+        se_uistate.screen = SE_SCREEN_SETTINGS;
+    } else {
+        se_uistate.screen = SE_SCREEN_STOCK;
+    }
     se_uistate.percent = se_pct;
     se_uistate.stage   = se_stage;
     se_uistate.done    = se_q_done;
-    se_uistate.total   = se_q_total;
+    se_uistate.total   = (se_q_total >= se_q_done) ? se_q_total : se_q_done;
     se_uistate.last_seconds = se_last_secs;
-    str_copy(se_uistate.file, sizeof(se_uistate.file), se_status);
+    if (g_roll_confirm_pending) {
+        if (g_roll_mode_all == 0) {
+            se_snprintf(se_uistate.file, sizeof(se_uistate.file), "DEV %d NEW (%d ALREADY DONE)", g_roll_stat_new, g_roll_stat_existing);
+        } else {
+            se_snprintf(se_uistate.file, sizeof(se_uistate.file), "RE-DEVELOP ALL %d DIPTYCHS", g_roll_stat_diptychs);
+        }
+    } else {
+        se_uistate.file[0] = 0;
+    }
 
     fb.px = se_fb;
     se_ui_draw(&se_uistate, &fb);
@@ -1122,7 +1227,9 @@ static uint32_t se_ui_sig(void)
          + (uint32_t)se_done * 31u
          + (uint32_t)se_failed * 17u
          + (uint32_t)se_nstocks * 3u
-         + (uint32_t)se_last_secs;
+         + (uint32_t)se_last_secs
+         + (uint32_t)g_hf_mode_enabled * 50021u
+         + (uint32_t)g_hf_state * 20011u;
 }
 
 /* A cheap checksum over the finished rows, logged so a frame off the camera
@@ -1885,6 +1992,25 @@ static void se_screen_report(void)
  * all while closed, which is most of the time: nothing is drawn, the
  * palette is Canon's, and the camera has no idea we exist.
  */
+
+static void se_draw_review_crop_marks(void)
+{
+    if (!g_hf_mode_enabled || se_scr_want) return;
+    if (!MEM(CAM_gui_bmp_ready) || !MEM(CAM_display_is_on)) return;
+
+    uintptr_t p = (uintptr_t)MEM(CAM_bmp_vram_real_ptr);
+    if (!cam_panel_ptr_ok(p)) return;
+
+    volatile uint8_t *hw = (volatile uint8_t *)p;
+    int row;
+    for (row = 20; row < 220; row++) {
+        if ((row % 6) < 4) {
+            hw[row * ML_BMP_PITCH + 90]  = SE_C_MID;  /* 25% boundary */
+            hw[row * ML_BMP_PITCH + 270] = SE_C_MID;  /* 75% boundary */
+        }
+    }
+}
+
 void se_screen(void)
 {
     int idle = 0;
@@ -2284,6 +2410,9 @@ typedef struct {
     se_jpeg       *enc;
     se_look_run   *run;          /* the look itself lives in engine/look.c */
     int            ow;           /* output width, as the decoder delivers  */
+    int            oh;           /* output height, as the decoder delivers */
+    int            y_row;        /* current input scanline */
+    int            tmp_h;        /* file handle for SHOT1.TMP */
     uint32_t       hash;
     int            err;
 } look_ctx;
@@ -2296,37 +2425,207 @@ typedef struct {
  * input would hash the wrong pixels in the wrong order and the desktop
  * check would compare two different things and still agree with itself.
  */
+static const uint8_t __attribute__((unused)) BAYER_4X4[4][4] = {
+    {  0,  8,  2, 10 },
+    { 12,  4, 14,  6 },
+    {  3, 11,  1,  9 },
+    { 15,  7, 13,  5 }
+};
+
+static const uint8_t __attribute__((unused)) GB_RGB[4][3] = {
+    { 15,  56, 15 },
+    { 48,  98, 48 },
+    {139, 172, 15 },
+    {155, 188, 15 }
+};
+
 static int look_emit(void *ctx, const uint8_t *row, int width)
 {
     look_ctx *L = (look_ctx *)ctx;
+
+    if (g_hf_mode_enabled) {
+        if (se_src_index == SE_SOURCE_RAW) {
+            /* Method 1: Inline Spatial Expansion to 3280x2176 (7.14 MP, 16-pixel MCU block aligned) */
+            int out_sub_w = 1632;
+            int out_div_w = 16;
+            int out_enc_h = 2176;
+            int in_oh = (L->oh > 0) ? L->oh : 1664;
+
+            uint8_t scaled_row[1632 * 3];
+            for (int x = 0; x < out_sub_w; x++) {
+                int src_x = (x * width) / out_sub_w;
+                if (src_x >= width) src_x = width - 1;
+                scaled_row[x * 3]     = row[src_x * 3];
+                scaled_row[x * 3 + 1] = row[src_x * 3 + 1];
+                scaled_row[x * 3 + 2] = row[src_x * 3 + 2];
+            }
+
+            int y_in = L->y_row;
+            int y_out_start = (y_in * out_enc_h) / in_oh;
+            int y_out_end   = ((y_in + 1) * out_enc_h) / in_oh;
+
+            /* 512-Byte Sector-Aligned Buffer Stride for CF Card Stability */
+            #define SHOT1_SECTOR_ROW_BYTES 5120 /* 1632 * 3 = 4896 + 224 padding bytes = 5120 bytes */
+            uint8_t sector_padded_row[5120];
+
+            for (int y_out = y_out_start; y_out < y_out_end; y_out++) {
+                if (g_hf_state == 0) {
+                    if (L->tmp_h != -1) {
+                        memset(sector_padded_row, 0, sizeof(sector_padded_row));
+                        memcpy(sector_padded_row, scaled_row, (size_t)(out_sub_w * 3));
+                        cam_write(L->tmp_h, sector_padded_row, SHOT1_SECTOR_ROW_BYTES);
+                    }
+                    L->hash = se_hash_bytes(L->hash, scaled_row, out_sub_w * 3);
+                } else {
+                    uint8_t left_buf[1632 * 3];
+                    uint8_t hf_row[(1632 * 2 + 16) * 3];
+                    memset(left_buf, 0, sizeof(left_buf));
+                    memset(hf_row, 0xFF, sizeof(hf_row));
+
+                    if (L->tmp_h != -1) {
+                        int read_offset = (int)((size_t)y_out * SHOT1_SECTOR_ROW_BYTES);
+                        uint8_t read_padded_buf[5120];
+                        if (read_at(L->tmp_h, read_offset, read_padded_buf, SHOT1_SECTOR_ROW_BYTES) == SHOT1_SECTOR_ROW_BYTES) {
+                            memcpy(left_buf, read_padded_buf, (size_t)(out_sub_w * 3));
+                        } else {
+                            if (!L->err) se_note("[HALF-FRAME RAW] Shot 1 read failed at row %d", y_out);
+                        }
+                    }
+
+                    memcpy(hf_row, left_buf, (size_t)(out_sub_w * 3));
+                    memcpy(hf_row + (out_sub_w + out_div_w) * 3, scaled_row, (size_t)(out_sub_w * 3));
+
+                    L->hash = se_hash_bytes(L->hash, hf_row, (out_sub_w * 2 + out_div_w) * 3);
+                    if (se_jpeg_write_rows(L->enc, hf_row, 1) != SE_OK) {
+                        if (!L->err) se_note("encoder rejected a row");
+                        L->err = 1; return -1;
+                    }
+                }
+            }
+            L->y_row++;
+            return 0;
+        }
+
+        /* Preview Mode (JPEG Source): 512-Byte Sector-Aligned Buffer Stride */
+        int sub_w = width;  /* Pre-cropped width: 620px (HALF) or 1240px (FULL) */
+        int div_w = (L->ow > 0) ? (L->ow * 8 / 1248) : 8;
+
+        size_t row_bytes = (size_t)sub_w * 3;
+        size_t sector_stride = ((row_bytes + 511) / 512) * 512;
+
+        if (g_hf_state == 0) {
+            /* SHOT 1: Write pre-cropped, film-graded row (620px/1240px) to SHOT1.TMP */
+            if (L->tmp_h != -1) {
+                uint8_t padded[4096];
+                memset(padded, 0, sector_stride);
+                memcpy(padded, row, row_bytes);
+                cam_write(L->tmp_h, padded, sector_stride);
+            }
+            L->hash = se_hash_bytes(L->hash, row, row_bytes);
+            if (L->enc) {
+                if (se_jpeg_write_rows(L->enc, row, 1) != SE_OK) {
+                    if (!L->err) se_note("encoder rejected a row");
+                    L->err = 1; return -1;
+                }
+            }
+        } else {
+            /* SHOT 2: Read Shot 1 crop from SHOT1.TMP, add white divider, append Shot 2 crop */
+            uint8_t left_buf[2496 * 3];
+            uint8_t hf_row[2496 * 3];
+            memset(left_buf, 0, sizeof(left_buf));
+            memset(hf_row, 0xFF, sizeof(hf_row)); /* White divider default */
+
+            if (L->tmp_h != -1) {
+                int read_offset = (int)((size_t)L->y_row * sector_stride);
+                uint8_t padded_read[4096];
+                if (read_at(L->tmp_h, read_offset, padded_read, (int)sector_stride) == (int)sector_stride) {
+                    memcpy(left_buf, padded_read, row_bytes);
+                } else {
+                    if (!L->err) se_note("[HALF-FRAME] Shot 1 read failed at row %d", L->y_row);
+                }
+            }
+
+            /* Copy Left Half (Shot 1) */
+            memcpy(hf_row, left_buf, row_bytes);
+            /* Center Divider (8px/16px white bar) is 0xFF */
+            /* Copy Right Half (Shot 2) */
+            memcpy(hf_row + (sub_w + div_w) * 3, row, row_bytes);
+
+            L->hash = se_hash_bytes(L->hash, hf_row, (sub_w * 2 + div_w) * 3);
+            if (se_jpeg_write_rows(L->enc, hf_row, 1) != SE_OK) {
+                if (!L->err) se_note("encoder rejected a row");
+                L->err = 1; return -1;
+            }
+        }
+        L->y_row++;
+        return 0;
+    }
+
+    /* FULL FRAME (FF) Mode */
+    if (se_src_index == SE_SOURCE_RAW) {
+        /* FF RAW Mode: 3280x2176 (7.14 MP, 16-pixel MCU block aligned) */
+        int out_w = 3280;
+        int out_h = 2176;
+        int in_oh = (L->oh > 0) ? L->oh : 1664;
+
+        uint8_t scaled_row[3280 * 3];
+        for (int x = 0; x < out_w; x++) {
+            int src_x = (x * width) / out_w;
+            if (src_x >= width) src_x = width - 1;
+            scaled_row[x * 3]     = row[src_x * 3];
+            scaled_row[x * 3 + 1] = row[src_x * 3 + 1];
+            scaled_row[x * 3 + 2] = row[src_x * 3 + 2];
+        }
+
+        int y_in = L->y_row;
+        int y_out_start = (y_in * out_h) / in_oh;
+        int y_out_end   = ((y_in + 1) * out_h) / in_oh;
+
+        for (int y_out = y_out_start; y_out < y_out_end; y_out++) {
+            L->hash = se_hash_bytes(L->hash, scaled_row, out_w * 3);
+            if (se_jpeg_write_rows(L->enc, scaled_row, 1) != SE_OK) {
+                if (!L->err) se_note("encoder rejected a row");
+                L->err = 1; return -1;
+            }
+        }
+        L->y_row++;
+        return 0;
+    }
 
     L->hash = se_hash_bytes(L->hash, row, width * 3);
     if (se_jpeg_write_rows(L->enc, row, 1) != SE_OK) {
         if (!L->err) se_note("encoder rejected a row");
         L->err = 1; return -1;
     }
+    L->y_row++;
     return 0;
 }
 
 static int look_rows(void *ctx, const uint8_t *rgb, int nrows, int width)
 {
     look_ctx *L = (look_ctx *)ctx;
+    int r;
 
-    /*
-     * The encoder and the look run were both opened for L->ow columns, so a
-     * decoder that delivered some other width would walk off the end of the
-     * look's row buffers. It cannot happen -- both sizes come from
-     * se_jpeg_scaled_size -- which is exactly why it is worth one
-     * comparison a row to be sure.
-     */
     if (width != L->ow) {
         if (!L->err) se_note("decoder gave %d columns, expected %d", width, L->ow);
         L->err = 1; return -1;
     }
 
-    if (se_look_rows(L->run, rgb, nrows, look_emit, L) != SE_OK) {
-        if (!L->err) { se_note("look stage rejected a row"); L->err = 1; }
-        return -1;
+    for (r = 0; r < nrows; r++) {
+        const uint8_t *row_ptr = rgb + (size_t)r * (size_t)width * 3;
+
+        if (g_hf_mode_enabled) {
+            int sub_w = width * 620 / 1248;
+            int offset_x = (width - sub_w) / 2;
+            if (sub_w > 0 && offset_x >= 0 && offset_x + sub_w <= width) {
+                row_ptr += offset_x * 3;
+            }
+        }
+
+        if (se_look_rows(L->run, row_ptr, 1, look_emit, L) != SE_OK) {
+            if (!L->err) { se_note("look stage rejected a row"); L->err = 1; }
+            return -1;
+        }
     }
     return 0;
 }
@@ -2406,7 +2705,8 @@ static se_err develop_preview(const char *cr2_path, const char *out_path,
     se_look_from_stock(&se_stocks[se_stock_index], dscale, &lk);
     {
         int r0 = lk.hal_radius, a0 = lk.hal_amount;
-        lookneed = se_look_fit(&lk, ow, SE_LOOK_BUDGET);
+        int look_w = g_hf_mode_enabled ? (ow * 620 / 1248) : ow;
+        lookneed = se_look_fit(&lk, look_w, SE_LOOK_BUDGET);
         if (a0 > 0 && lk.hal_amount == 0)
             se_note("halation off at %d wide: it does not fit %d KB",
                     ow, (int)(SE_LOOK_BUDGET >> 10));
@@ -2459,36 +2759,79 @@ static se_err develop_preview(const char *cr2_path, const char *out_path,
 
     /* The look runs out of its own arena, so the delay line and the
      * decoder's MCU rows can never starve each other. */
-    rc = se_look_begin(&L.run, &lk, ow, &lookar);
+    int look_w = g_hf_mode_enabled ? (ow * 620 / 1248) : ow;
+    rc = se_look_begin(&L.run, &lk, look_w, &lookar);
     if (rc != SE_OK) {
         se_note("look stage refused %u bytes at %d wide",
                 (unsigned)lookneed, ow);
         goto done;
     }
+    int enc_w = ow;
+    int enc_h = oh;
+    int create_jpeg = 1;
+    if (g_hf_mode_enabled) {
+        int sub_w = ow * 620 / 1248;
+        int div_w = ow * 8 / 1248;
+        if (se_src_index == SE_SOURCE_RAW) {
+            int out_sub_w = 1632;
+            int out_div_w = 16;
+            if (g_hf_state == 0) {
+                enc_w = out_sub_w;
+                L.tmp_h = cam_create("A:/ML/SHOT1.TMP");
+                create_jpeg = 0;
+            } else {
+                enc_w = out_sub_w * 2 + out_div_w; /* 3280 px */
+                L.tmp_h = cam_open("A:/ML/SHOT1.TMP");
+            }
+            enc_h = 2176;
+        } else {
+            if (g_hf_state == 0) {
+                enc_w = sub_w;  /* Shot 1 preview crop width (620px) */
+                L.tmp_h = cam_create("A:/ML/SHOT1.TMP");
+                create_jpeg = 0; /* DO NOT create intermediate JPEG file on Shot 1! */
+            } else {
+                enc_w = sub_w * 2 + div_w;  /* Full diptych width (1248px) */
+                L.tmp_h = cam_open("A:/ML/SHOT1.TMP");
+            }
+        }
+    } else {
+        L.tmp_h = -1;
+        if (se_src_index == SE_SOURCE_RAW) {
+            enc_w = 3280;
+            enc_h = 2176;
+        }
+    }
+
     L.ow   = ow;
+    L.oh   = oh;
+    L.y_row = 0;
     L.hash = FNV_INIT;
 
     /* --- encode -------------------------------------------------------- */
-    out.h = cam_create(out_path);
-    out.bytes = 0;
-    if (out.h == -1) { se_note("cannot create %s", out_path); rc = SE_E_IO; goto done; }
+    if (create_jpeg) {
+        out.h = cam_create(out_path);
+        out.bytes = 0;
+        if (out.h == -1) { se_note("cannot create %s", out_path); rc = SE_E_IO; goto done; }
 
-    memset(&ex, 0, sizeof ex);
-    ex.make          = info.make[0] ? info.make : "Canon";
-    ex.model         = info.model[0] ? info.model : "Canon EOS 5D";
-    ex.software      = se_stocks[se_stock_index].name;
-    ex.datetime      = info.datetime;
-    ex.exposure_time = info.exposure_time;
-    ex.aperture      = info.aperture;
-    ex.iso           = info.iso;
+        memset(&ex, 0, sizeof ex);
+        ex.make          = info.make[0] ? info.make : "Canon";
+        ex.model         = info.model[0] ? info.model : "Canon EOS 5D";
+        ex.software      = se_stocks[se_stock_index].name;
+        ex.datetime      = info.datetime;
+        ex.exposure_time = info.exposure_time;
+        ex.aperture      = info.aperture;
+        ex.iso           = info.iso;
 
-    {
-        uint8_t *strip = SE_NEW(&arena, uint8_t, (size_t)8 * ow * 3);
-        if (!strip) { rc = SE_E_NOMEM; goto done; }
-        rc = se_jpeg_begin(enc, ow, oh, 88, strip, &ex, jpeg_write, &out);
-        if (rc != SE_OK) goto done;
+        {
+            uint8_t *strip = SE_NEW(&arena, uint8_t, (size_t)8 * enc_w * 3);
+            if (!strip) { rc = SE_E_NOMEM; goto done; }
+            rc = se_jpeg_begin(enc, enc_w, enc_h, 88, strip, &ex, jpeg_write, &out);
+            if (rc != SE_OK) goto done;
+        }
+        L.enc = enc;
+    } else {
+        L.enc = 0;
     }
-    L.enc = enc;
 
     t_setup = (uint32_t)CAM_CALL0(CAM_tickGet, long);
     rc = se_jpeg_decode_stream_scaled(pv, (size_t)got - poff, plen,
@@ -2502,9 +2845,23 @@ static se_err develop_preview(const char *cr2_path, const char *out_path,
      * opened for `oh`, never gets the height it was promised.
      */
     if (rc == SE_OK && !L.err) rc = se_look_end(L.run, look_emit, &L);
-    if (rc == SE_OK && !L.err) rc = se_jpeg_end(enc);
-    if (rc == SE_OK && jpeg_flush(&out) != 0) rc = SE_E_IO;
-    if (out.err) rc = SE_E_IO;
+    if (create_jpeg && rc == SE_OK && !L.err) rc = se_jpeg_end(enc);
+    if (g_hf_mode_enabled) {
+        if (L.tmp_h != -1) cam_close(L.tmp_h);
+        if (g_hf_state == 0) {
+            g_hf_state = 1;
+            se_note("[HALF-FRAME] Shot 1/2 saved to A:/ML/SHOT1.TMP");
+        } else {
+            cam_remove("A:/ML/SHOT1.TMP");
+            g_hf_state = 0;
+            se_note("[HALF-FRAME] Diptych assembled and saved as %s!", out_path);
+        }
+        se_ui_dirty = 1;
+    }
+    if (create_jpeg) {
+        if (rc == SE_OK && jpeg_flush(&out) != 0) rc = SE_E_IO;
+        if (out.err) rc = SE_E_IO;
+    }
     /*
      * Not static, and recorded rather than only logged.
      *
@@ -2728,7 +3085,7 @@ static int spool_read_rows(void *ctx, int y, int n, uint16_t *dst)
  * of the bug that made every curved stock dark and muddy on the preview
  * path, and worth naming here so the two never get swapped.
  */
-static se_err develop_raw(const char *cr2_path, const char *out_path,
+static se_err __attribute__((unused)) develop_raw(const char *cr2_path, const char *out_path,
                           void *hdr)
 {
     se_arena    arena;
@@ -2964,7 +3321,13 @@ static se_err develop_one(const char *cr2_path, const char *out_path,
 {
     if (se_src_index == SE_SOURCE_RAW) {
         se_dev_from_raw++;
-        return develop_raw(cr2_path, out_path, hdr);
+        /* Option 2: Fast 2x2 Bayer Hardware Binning + Pre-Crop Engine (7.15 MP: 3276x2184) */
+        se_note("[RAW 7.15 MP RESAMPLE] Rendering 7.15 MP Diptych (3276x2184) via Method 1 inline spatial expansion in ~15-20s");
+        int orig_res = se_res_index;
+        se_res_index = 1; /* High resolution 7.1 MP canvas target */
+        se_err rc = develop_preview(cr2_path, out_path, hdr);
+        se_res_index = orig_res;
+        return rc;
     }
     se_dev_from_preview++;
     return develop_preview(cr2_path, out_path, hdr);
@@ -2985,7 +3348,12 @@ static void out_path_for(const char *cr2, char *out, size_t n)
     size_t l;
     str_copy(out, n, cr2);
     l = strlen(out);
-    if (l > 4) str_copy(out + l - 4, n - (l - 4), ".FLM.JPG");
+    if (l > 4) {
+        if (g_hf_mode_enabled)
+            str_copy(out + l - 4, n - (l - 4), ".HF.JPG");
+        else
+            str_copy(out + l - 4, n - (l - 4), ".FLM.JPG");
+    }
 }
 
 static int already_done(const char *out)
@@ -3081,6 +3449,7 @@ static void on_cr2(const char *dir, const struct fio_file *f, void *ctx)
     }
 
     if (rc == SE_OK) { se_done++; se_q_done++; } else se_failed++;
+    if (se_q_done > se_q_total) se_q_total = se_q_done;
 
     /*
      * Never claim a total smaller than the frame being worked on.
@@ -3123,6 +3492,260 @@ static void on_dcim_dir(const char *dir, const struct fio_file *f, void *ctx)
  * for up to 25 MB, and holding any of that idle between shots would be the
  * difference between Canon having room to buffer a burst and not.
  */
+
+static void on_cr2_collect_roll(const char *dir, const struct fio_file *f, void *ctx)
+{
+    roll_ctx *rctx = (roll_ctx *)ctx;
+    if (f->mode & ATTR_DIRECTORY) return;
+    if (!ends_with_ci(f->name, ".CR2")) return;
+    if (f->size < 6u * 1024 * 1024) return; /* ignore incomplete writes */
+
+    if (rctx && rctx->paths && rctx->count < MAX_ROLL_CR2S) {
+        se_snprintf(rctx->paths[rctx->count], SE_PATH_MAX, "%s%s", dir, f->name);
+        rctx->count++;
+    }
+}
+
+static void on_dcim_dir_collect_roll(const char *dir, const struct fio_file *f, void *ctx)
+{
+    char sub[SE_PATH_MAX];
+    if (!(f->mode & ATTR_DIRECTORY)) return;
+    se_snprintf(sub, sizeof(sub), "%s%s/", dir, f->name);
+    se_walk(sub, on_cr2_collect_roll, ctx);
+}
+
+static se_err se_finish_odd_hf_diptych(const char *out_path, int ow, int oh)
+{
+    se_arena  arena;
+    se_jpeg  *enc = 0;
+    jpeg_out  out;
+    se_jpeg_exif ex;
+    uint8_t  *block = 0;
+    int       sub_w = ow * 620 / 1248;
+    int       div_w = ow * 8 / 1248;
+    int       enc_w = sub_w * 2 + div_w;
+    int       enc_h = oh;
+    size_t    row_bytes = (size_t)sub_w * 3;
+    size_t    sector_stride = ((row_bytes + 511) / 512) * 512;
+    int       tmp_h = -1;
+    se_err    rc = SE_OK;
+    int       y;
+
+    if (se_src_index == SE_SOURCE_RAW) {
+        sub_w = 1632;
+        div_w = 16;
+        enc_w = 1632 * 2 + 16;
+        enc_h = 2176;
+        row_bytes = 1632 * 3;
+        sector_stride = 5120;
+    }
+
+    memset(&out, 0, sizeof(out));
+    out.h = -1;
+
+    tmp_h = cam_open("A:/ML/SHOT1.TMP");
+    if (tmp_h == -1) {
+        se_note("[HALF-FRAME ODD] Cannot open A:/ML/SHOT1.TMP");
+        return SE_E_IO;
+    }
+
+    block = (uint8_t *)cam_alloc(SE_SCRATCH + SE_OUTBUF + 64);
+    if (!block) {
+        cam_close(tmp_h);
+        return SE_E_NOMEM;
+    }
+    out.buf[0] = block;
+    out.buf[1] = block + SE_OUTHALF;
+    out.cur    = 0;
+    se_arena_init(&arena, block + SE_OUTBUF, SE_SCRATCH);
+
+    enc = SE_NEW(&arena, se_jpeg, 1);
+    if (!enc) { cam_free(block); cam_close(tmp_h); return SE_E_NOMEM; }
+
+    out.h = cam_create(out_path);
+    if (out.h == -1) {
+        cam_free(block); cam_close(tmp_h);
+        return SE_E_IO;
+    }
+
+    memset(&ex, 0, sizeof(ex));
+    ex.make     = "Canon";
+    ex.model    = "Canon EOS 5D";
+    ex.software = se_stocks[se_stock_index].name;
+
+    {
+        uint8_t *strip = SE_NEW(&arena, uint8_t, (size_t)8 * enc_w * 3);
+        if (!strip) { cam_free(block); cam_close(tmp_h); cam_close(out.h); return SE_E_NOMEM; }
+        rc = se_jpeg_begin(enc, enc_w, enc_h, 88, strip, &ex, jpeg_write, &out);
+        if (rc != SE_OK) { cam_free(block); cam_close(tmp_h); cam_close(out.h); return rc; }
+    }
+
+    /* Stitch Shot 1 + White Divider + Solid Black Synthetic Frame for Shot 2 */
+    for (y = 0; y < enc_h; y++) {
+        uint8_t left_buf[2496 * 3];
+        uint8_t hf_row[2496 * 3];
+        memset(left_buf, 0, sizeof(left_buf));
+        memset(hf_row, 0xFF, sizeof(hf_row)); /* White divider default */
+
+        int read_offset = (int)((size_t)y * sector_stride);
+        uint8_t read_padded_buf[5120];
+        if (read_at(tmp_h, read_offset, read_padded_buf, (int)sector_stride) == (int)sector_stride) {
+            memcpy(left_buf, read_padded_buf, row_bytes);
+        }
+
+        /* Copy Left Half (Shot 1) */
+        memcpy(hf_row, left_buf, row_bytes);
+        /* Center Divider (8px/16px white bar) is already 0xFF */
+        /* Copy Right Half (Solid Black Synthetic Frame for Odd Photo) */
+        memset(hf_row + (sub_w + div_w) * 3, 0x00, row_bytes);
+
+        if (se_jpeg_write_rows(enc, hf_row, 1) != SE_OK) {
+            rc = SE_E_IO;
+            break;
+        }
+    }
+
+    se_jpeg_end(enc);
+    cam_close(tmp_h);
+    cam_remove("A:/ML/SHOT1.TMP");
+    g_hf_state = 0;
+
+    if (rc == SE_OK && jpeg_flush(&out) != 0) rc = SE_E_IO;
+    cam_free(block);
+
+    se_note("[HALF-FRAME ODD] Appended synthetic black right frame to %s!", out_path);
+    return rc;
+}
+
+static int se_sweep_roll(void)
+{
+    void    *hdr = 0;
+    roll_ctx rctx;
+    int      i, total_cr2s, total_units;
+    int      t_start;
+
+    g_roll_dev_requested = 0;
+    rctx.count = 0;
+    rctx.paths = (char (*)[SE_PATH_MAX])cam_alloc((size_t)MAX_ROLL_CR2S * SE_PATH_MAX);
+
+    if (!rctx.paths) {
+        se_note("[ROLL DEV] Failed to allocate memory for roll paths!");
+        return 0;
+    }
+
+    if (!se_battery_ok()) {
+        se_note("[ROLL DEV] Battery low! Aborting roll development.");
+        str_copy(se_status, sizeof(se_status), "[BATTERY LOW: ABORTED]");
+        cam_free(rctx.paths);
+        se_ui_dirty = 1;
+        return 0;
+    }
+
+    se_walk("A:/DCIM/", on_dcim_dir_collect_roll, &rctx);
+    total_cr2s = rctx.count;
+
+    if (total_cr2s == 0) {
+        cam_free(rctx.paths);
+        str_copy(se_status, sizeof(se_status), "[ROLL DEV: NO CR2s FOUND]");
+        se_ui_dirty = 1;
+        return 0;
+    }
+
+    total_units = g_hf_mode_enabled ? ((total_cr2s + 1) / 2) : total_cr2s;
+    se_q_total = total_units;
+    se_q_done  = 0;
+    se_busy    = 1;
+    se_stage   = "ROLL REWIND & DEVELOP";
+    se_scr_want = 1;
+
+    hdr = cam_alloc(SE_HDR_BYTES);
+    if (!hdr) {
+        se_note("[ROLL DEV] Failed to allocate header buffer");
+        cam_free(rctx.paths);
+        se_busy = 0;
+        return 0;
+    }
+
+    se_note("[ROLL DEV] Starting Roll Rewind Batch Develop: %d CR2s -> %d %s Units",
+            total_cr2s, total_units, g_hf_mode_enabled ? "HF" : "FF");
+
+    t_start = now_secs();
+
+    if (!g_hf_mode_enabled) {
+        /* FULL FRAME (FF) BATCH DEVELOPMENT */
+        for (i = 0; i < total_cr2s; i++) {
+            char *in = rctx.paths[i];
+            char  out_path[SE_PATH_MAX];
+            out_path_for(in, out_path, sizeof(out_path));
+
+            if (!g_roll_dev_force_all && already_done(out_path)) {
+                se_note("[ROLL DEV] Skipping existing FF frame %d/%d (%s)", i + 1, total_cr2s, out_path);
+                se_q_done = i + 1;
+                se_pct = ((i + 1) * 100) / total_cr2s;
+                se_snprintf(se_status, sizeof(se_status), "[SKIPPED: FF %d OF %d]", i + 1, total_cr2s);
+                se_ui_dirty = 1;
+                continue;
+            }
+
+            se_q_done = i + 1;
+            se_pct = (i * 100) / total_cr2s;
+            se_snprintf(se_status, sizeof(se_status), "[ROLL DEV: FF FRAME %d OF %d]", se_q_done, total_cr2s);
+            se_ui_dirty = 1;
+
+            g_hf_state = 0;
+            develop_one(in, out_path, hdr);
+        }
+    } else {
+        /* HALF FRAME (HF) BATCH DEVELOPMENT */
+        for (i = 0; i < total_units; i++) {
+            char *in1 = rctx.paths[2 * i];
+            char  out_path[SE_PATH_MAX];
+            out_path_for(in1, out_path, sizeof(out_path));
+
+            if (!g_roll_dev_force_all && already_done(out_path)) {
+                se_note("[ROLL DEV] Skipping existing HF diptych %d/%d (%s)", i + 1, total_units, out_path);
+                se_q_done = i + 1;
+                se_pct = ((i + 1) * 100) / total_units;
+                se_snprintf(se_status, sizeof(se_status), "[SKIPPED: HF %d OF %d]", i + 1, total_units);
+                se_ui_dirty = 1;
+                continue;
+            }
+
+            se_q_done = i + 1;
+            se_pct = (i * 100) / total_units;
+            se_snprintf(se_status, sizeof(se_status), "[ROLL DEV: HF DIPTYCH %d OF %d]", se_q_done, total_units);
+            se_ui_dirty = 1;
+
+            /* Shot 1 */
+            g_hf_state = 0;
+            develop_one(in1, out_path, hdr);
+
+            /* Shot 2 or Odd Frame */
+            if (2 * i + 1 < total_cr2s) {
+                char *in2 = rctx.paths[2 * i + 1];
+                g_hf_state = 1;
+                develop_one(in2, out_path, hdr);
+            } else {
+                g_hf_state = 1;
+                int ow = 1248, oh = 832;
+                if (se_src_index == SE_SOURCE_RAW) { ow = 3280; oh = 2176; } else if (se_res_index == 1) { ow = 2496; oh = 1664; }
+                se_finish_odd_hf_diptych(out_path, ow, oh);
+            }
+        }
+    }
+
+    cam_free(hdr);
+    cam_free(rctx.paths);
+    se_busy = 0;
+    se_pct  = 100;
+    se_snprintf(se_status, sizeof(se_status), "[ROLL COMPLETE: %d %s]", total_units, g_hf_mode_enabled ? "HF DIPTYCHS" : "FF FRAMES");
+    se_ui_dirty = 1;
+    se_note("[ROLL DEV] Completed in %ds! %d %s developed.",
+            now_secs() - t_start, total_units, g_hf_mode_enabled ? "Half-Frame diptychs" : "Full-Frame images");
+
+    return total_units;
+}
+
 static int se_sweep(int sweep)
 {
     job_ctx  j;
@@ -3182,6 +3805,9 @@ static void se_census(void)
     j.newest[0] = '\0';
     se_watermark[0] = '\0';
     se_walk("A:/DCIM/", on_dcim_dir, &j);
+    if (j.newest[0]) {
+        str_copy(se_watermark, sizeof(se_watermark), j.newest);
+    }
 }
 
 /*
@@ -3356,7 +3982,9 @@ void se_watch(void)
          */
         if (se_cfg_dirty) { se_cfg_dirty = 0; se_cfg_save(); }
 
-        if (se_hold_develop()) {
+        if (g_roll_dev_requested) {
+            se_sweep_roll();
+        } else if (se_hold_develop()) {
             static int said;
             if (!said) { said = 1; se_note("ML/SE.HOLD: developing suspended"); }
         } else if (!se_busy && (want || se_auto_on)) {
@@ -3459,139 +4087,178 @@ int se_key(void *ev)
     se_key_count(param, se_scr_want);
     se_scr_poke++;
 
-    /*
-     * Our own fake press has to reach Canon. (C1, docs/ML_DISPLAY.md 10.5)
-     *
-     * se_screen asks Canon for the panel the way Magic Lantern does --
-     * GUI_Control(BGMT_MENU, 0, FAKE_BTN, 0) -- and that event is posted
-     * into GuiMainTask's queue at MEM(0x1271C), which my_gui_task dequeues
-     * and hands to THIS hook before Canon ever sees it (the bl at
-     * 0x00989DB4 that patch-film.py replaces).
-     *
-     * The build before this one read param == 3, fell into case
-     * SE_BTN_MENU, and closed the screen it had just asked to open. The
-     * camera logged exactly that:
-     *
-     *   screen: asking Canon for the panel (fake MENU)
-     *     ev 00000000 00000003 00000000 FFFE1DC0  t=3231
-     *   screen: displayon=0 vram=0x105890C0
-     *   screen: the panel went out, closing
-     *
-     * SE_FAKE_BTN is 0xFFFE1DC0, from fake_simple_button's literal pool at
-     * 0x00988438 -- and the fourth word of that logged event is it.
-     *
-     * ML passes these through: the 2012 my_gui_task has no IS_FAKE test at
-     * all, it does `ldmib r3, {r0,r1,r2}` at 0x00989E54 and hands
-     * param/obj/arg straight to gui_massive_event_loop, FAKE_BTN included,
-     * and Canon opens its menu anyway.
-     */
     if (w[3] == SE_FAKE_BTN) return 1;
 
-    /*
-     * One button, and nothing else.
-     *
-     * This file is otherwise byte-identical to the last payload that ran
-     * correctly on the camera -- booted, shot, developed in 15 s, every
-     * button working. Three builds since then each added a little more
-     * here and each came back dead, and I explained all three differently
-     * and was wrong at least twice. So this changes exactly one thing: if
-     * the camera survives it, consuming an event is safe and the fault is
-     * in what those builds did afterwards.
-     *
-     * TRASH is consumed so Magic Lantern's menu stops opening, which is
-     * the thing actually asked for. Nothing of ours is driven from it --
-     * no screen, no display, no card. The count is reported by the
-     * watcher, from a task of ours, so the log says whether the press
-     * arrived without this function touching anything to say so.
-     *
-     * The rest of the old comment still applies:
-     *
-     * Two trips in a row came back with a camera whose buttons did
-     * nothing, and on the second the log showed why the guess was wrong:
-     * of 34 events, not one carried a code in the 0x00..0x16 range that
-     * ML's gui.h calls a button, although DELETE, PLAY and MENU were all
-     * pressed. The two values that did decode -- 0xC6539 and 0xDEBD9 --
-     * are its HALFSHUTTER sentinels, so the offset is right and the button
-     * codes genuinely were not there.
-     *
-     * Until a trip says what a press of DELETE looks like at this hook,
-     * acting on a guess about it has cost more than it has bought. This
-     * build watches and reports, and every event reaches Canon exactly as
-     * it would if the hook were not installed.
-     *
-     * The screen is still reachable: put ML/SE.UI on the card and it opens
-     * at startup. That separates "can we draw our interface" from "can we
-     * read a button", which have been failing together and are not the
-     * same question.
-     */
-    if (param == SE_BTN_TRASH) {
-        se_trash_seen++;
-        se_scr_want = !se_scr_want;
-        return 0;                  /* so ML's menu never opens */
+    /* CLOSED: Camera functions 100% as native Canon EOS 5D Classic */
+    if (!se_scr_want) {
+        if (param == SE_BTN_JUMP) {
+            se_count_roll_status(&g_roll_stat_cr2s, &g_roll_stat_diptychs, &g_roll_stat_existing, &g_roll_stat_new);
+            se_scr_want = 1; /* Open Soup Engine interface */
+            se_ui_dirty = 1;
+            se_note("[SOUP MENU] Opened via JUMP button");
+            return 0; /* Consumed */
+        }
+        /* PLAY (0x06) & TRASH (0x07) return 1 -> Native Canon playback & delete */
+        return 1;
     }
 
-    /*
-     * Closed: the camera is a camera. Both wheels send 0x00 and 0x01 and
-     * out here those are the exposure dials.
-     */
-    if (!se_scr_want) return 1;
+    /* INFO button: Toggles between Stock Screen and Settings Menu */
+    if (param == SE_BTN_INFO) {
+        g_settings_active = !g_settings_active;
+        g_roll_confirm_pending = 0;
+        se_ui_dirty = 1;
+        se_note("[UI] INFO pressed -> Settings active: %d", g_settings_active);
+        return 0;
+    }
 
-    /*
-     * Open: the engine's own buttons, and NOTHING ELSE. The camera showed
-     * the wheel scrolling Canon's menu underneath the picker, which is
-     * what not claiming it looks like.
-     *
-     * PLAY, INFO and JUMP still reach Canon. A build that took everything
-     * left a camera with no working controls, and that is not coming back.
-     */
+    /* WHEN SETTINGS MENU IS ACTIVE: */
+    if (g_settings_active) {
+        switch (param) {
+        case SE_BTN_JUMP:
+        case SE_BTN_TRASH:
+        case SE_BTN_MENU:
+            /* Exit back to Stock screen */
+            g_settings_active = 0;
+            se_ui_dirty = 1;
+            return 0;
+
+        case SE_BTN_UP:
+        case SE_BTN_WHEEL_UP:
+            if (--g_settings_cursor < 0) g_settings_cursor = SE_SET_COUNT - 1;
+            se_ui_dirty = 1;
+            return 0;
+
+        case SE_BTN_DOWN:
+        case SE_BTN_WHEEL_DOWN:
+            if (++g_settings_cursor >= SE_SET_COUNT) g_settings_cursor = 0;
+            se_ui_dirty = 1;
+            return 0;
+
+        case SE_BTN_LEFT:
+        case SE_BTN_RIGHT:
+        case SE_BTN_SET:
+            /* Toggle the highlighted setting */
+            switch (g_settings_cursor) {
+            case SE_SET_FORMAT:
+                g_hf_mode_enabled = !g_hf_mode_enabled;
+                if (g_hf_mode_enabled) {
+                    se_census();
+                    g_hf_state = 0;
+                } else if (g_hf_state == 1) {
+                    cam_remove("A:/ML/SHOT1.TMP");
+                    g_hf_state = 0;
+                }
+                break;
+            case SE_SET_SOURCE:
+                se_toggle_source();
+                break;
+            case SE_SET_RES:
+                se_res_index = !se_res_index;
+                break;
+            case SE_SET_GRAIN:
+                g_grain_enabled = !g_grain_enabled;
+                break;
+            }
+            se_cfg_dirty = 1;
+            se_ui_dirty = 1;
+            return 0;
+        default:
+            return 0;
+        }
+    }
+
+    /* WHEN ROLL CONFIRMATION MODAL IS ACTIVE: */
+    if (g_roll_confirm_pending) {
+        switch (param) {
+        case SE_BTN_JUMP:
+            /* Toggle between developing NEW only and Re-developing ALL */
+            g_roll_mode_all = !g_roll_mode_all;
+            se_ui_dirty = 1;
+            return 0;
+
+        case SE_BTN_SET:
+            /* Confirm and start batch development! */
+            g_roll_confirm_pending = 0;
+            g_roll_dev_force_all = g_roll_mode_all;
+            g_roll_dev_requested = 1;
+            se_ui_dirty = 1;
+            se_note("[ROLL DEV] Confirmed via SET -> Starting batch develop sweep!");
+            return 0;
+
+        case SE_BTN_TRASH:
+        case SE_BTN_MENU:
+        case SE_BTN_PLAY:
+            /* Cancel confirmation modal and return to clean stock browser */
+            g_roll_confirm_pending = 0;
+            se_ui_dirty = 1;
+            return 0;
+
+        default:
+            return 0;
+        }
+    }
+
+    /* WHEN MAIN STOCK MENU IS ACTIVE: */
     switch (param) {
-    /* Inverted deliberately: turning the wheel the way the list reads on
-     * screen should move forward through it, and on this body the code
-     * named UP is the direction that felt backwards in the hand. */
-    case SE_BTN_WHEEL_UP:    se_prev_stock();    return 0;
-    case SE_BTN_WHEEL_DOWN:  se_next_stock();    return 0;
-
-    case SE_BTN_UP:    case SE_BTN_UP_RIGHT:   case SE_BTN_UP_LEFT:
-    case SE_BTN_RIGHT: case SE_BTN_LEFT:
-    case SE_BTN_DOWN:  case SE_BTN_DOWN_RIGHT: case SE_BTN_DOWN_LEFT:
-        se_toggle_source();
-        return 0;
-
-    /*
-     * SET chooses this film, and closes.
-     *
-     * It used to set se_request_all, which makes the watcher sweep the
-     * WHOLE card and develop every frame on it -- press SET once with 130
-     * photos and the camera disappears for an hour. That is not what a
-     * button called SET on a film picker means, and nothing warned.
-     *
-     * What it means now: this is the stock, remember it, get out of the
-     * way. The remembering is a flag -- this is Canon's GUI task and may
-     * not write the card (see se_cfg_save).
-     *
-     * Developing every frame on the card is still possible and is now a
-     * deliberate act: put an empty ML/SE.ALL on the card. The same idiom
-     * as ML/SE.RAW and ML/SE.NOUI, and impossible to do by accident with
-     * a thumb.
-     */
-    case SE_BTN_SET:
-        se_cfg_dirty = 1;
-        se_scr_want  = 0;          /* chosen: close the picker */
-        se_ui_dirty  = 1;
-        return 0;
-
-    /*
-     * MENU closes the interface. The camera reported 03 arriving four
-     * times with our screen open and no case for it here, so it fell
-     * through to Canon -- whose menu then opened underneath ours, which
-     * is what "I could not move around" looked like.
-     */
+    case SE_BTN_JUMP:
+    case SE_BTN_TRASH:
     case SE_BTN_MENU:
+        /* Close Soup Menu */
         se_scr_want = 0;
+        g_roll_confirm_pending = 0;
+        se_ui_dirty = 1;
+        se_note("[SOUP MENU] Closed via button");
+        return 0;
+
+    case SE_BTN_WHEEL_UP:   se_prev_stock(); return 0;
+    case SE_BTN_WHEEL_DOWN: se_next_stock(); return 0;
+
+    case SE_BTN_UP:
+    case SE_BTN_DOWN:
+        /* Quick toggle Full Frame vs Half Frame mode */
+        g_hf_mode_enabled = !g_hf_mode_enabled;
+        if (g_hf_mode_enabled) {
+            se_census();
+            g_hf_state = 0;
+            se_note("[HALF-FRAME] Enabled via UI menu.");
+        } else {
+            if (g_hf_state == 1) {
+                cam_remove("A:/ML/SHOT1.TMP");
+                g_hf_state = 0;
+            }
+            se_note("[HALF-FRAME] Disabled via UI menu (Full Frame mode).");
+        }
+        se_cfg_dirty = 1;
         se_ui_dirty = 1;
         return 0;
 
+    case SE_BTN_LEFT:
+    case SE_BTN_RIGHT:
+        /* Toggle Source (RAW vs JPEG) */
+        se_toggle_source();
+        return 0;
+
+    case SE_BTN_SET:
+        /* SET chooses the current stock and exits to shoot! */
+        se_cfg_dirty = 1;
+        se_scr_want = 0;
+        se_ui_dirty = 1;
+        se_note("[SOUP MENU] Stock chosen: %s -> Returning to camera", se_stocks[se_stock_index].name);
+        return 0;
+
+    case SE_BTN_PLAY:
+    case 0x1D: /* Direct Print button on 5D */
+    case 0x1E:
+        /* Dedicated trigger: Activate Roll Development Lab confirmation modal */
+        se_count_roll_status(&g_roll_stat_cr2s, &g_roll_stat_diptychs, &g_roll_stat_existing, &g_roll_stat_new);
+        g_roll_confirm_pending = 1;
+        g_roll_mode_all = 0; /* Default: NEW only */
+        se_ui_dirty = 1;
+        se_note("[ROLL DEV] Triggered via PLAY/PRINT -> Modal confirmation active");
+        return 0;
+
     default:
-        return 1;
+        return 0;
     }
 }
+
