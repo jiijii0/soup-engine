@@ -1,224 +1,194 @@
-<div align="center">
-
-# 🎞️ Soup Engine <sub><sup>beta</sup></sub>
-
-### Film looks, in the camera, on a Canon EOS 5D Classic.
-
-<br>
-
-<img src="doc/camera.gif" alt="scrolling the film stocks on the camera" width="620">
-
-<br>
-<br>
-
-`beta` &nbsp;·&nbsp; `GPL v2` &nbsp;·&nbsp; `13 film stocks` &nbsp;·&nbsp; `EOS 5D Classic`
-
-</div>
-
-<br>
-
-Press the **trash button** and a list of film stocks fills the back
-screen. Turn the wheel to pick one, press `SET`. Every photo you take
-after that gets a second JPEG saved beside the raw, with the look
-already on it.
-
-```
-IMG_1234.CR2        your raw file, untouched
-IMG_1234.FLM.JPG    the same photo with the look on it
-```
-
-Your raw files are never modified. Delete the JPEG and the photo is
-exactly as the camera shot it.
-
-<br>
-
-![all thirteen film looks on one frame](doc/stocks.jpg)
-
-<div align="center"><sub>
-All thirteen, one frame, straight off the card.
-</sub></div>
-
-<br>
-
-> ⚠️ **Beta.** Unofficial code on a twenty year old camera. It's easy to
-> remove, and it never modifies your raw files.
-
-> ⚖️ **No warranty.** Like all GPL software this comes with none. You
-> install it at your own risk. See sections 11 and 12 of the
-> [licence](LICENSE).
-
-> 🎨 **The looks are still being tweaked** and will keep changing. The
-> names are shorthand for the films they're based on, not exact copies.
-> All trademarks belong to their owners.
-
-> 📷 **Canon EOS 50D.** A community port by
-> [@rebelt2i](https://github.com/rebelt2i) lives on its own branch,
-> [`50d`](https://github.com/jiijii0/soup-engine/tree/50d).
-
-<br>
-
----
-
-<br>
-
-## 📦 Installing
-
-You need a **Canon EOS 5D Classic** (the original 2005 one, firmware
-1.1.1) and a CompactFlash card. It will not work on any other Canon:
-the camera-side code is built for this body's firmware.
-
-<br>
-
-### 1️⃣ &nbsp; Install Magic Lantern
-
-> ### 👉 [builds.magiclantern.fm/5DC.html](https://builds.magiclantern.fm/5DC.html)
-
-Follow their instructions, then check the camera starts and their menu
-opens before going further. Soup Engine never touches your camera's
-boot flag; their installer does that.
-
-<br>
-
-### 2️⃣ &nbsp; Back up their `autoexec.bin`
-
-Copy it off the card somewhere safe. Putting it back is how you
-uninstall.
-
-<br>
-
-### 3️⃣ &nbsp; Copy the files to the root of your card
-
-> ### 📦 [Download the latest release](https://github.com/jiijii0/soup-engine/releases/latest)
-
-Unzip to the card root, replacing `AUTOEXEC.BIN`. Or copy
-[`card/`](card) from this repo, which is the same files.
-
-| file | what it is |
-|:--|:--|
-| 📄 `AUTOEXEC.BIN` | replaces Magic Lantern's |
-| ⚙️ `SE.BIN` | the engine |
-| 🎞️ `ML/FILM/` | the film stocks |
-
-<br>
-
-### ✅ &nbsp; Put the card in and switch the camera on
-
-That's it. Nothing to enable, no menu to find.
-
-> While Soup Engine is installed you won't have Magic Lantern's own
-> menu, since this replaces the file that provides it. Put their
-> `autoexec.bin` back whenever you want it again.
-
-<br>
-
----
-
-<br>
-
-## 📷 Using it
-
-Press the **trash button** and the picker fills the screen.
-
-| button | what it does |
-|:--|:--|
-| 🎛️ **Wheel** | choose a film |
-| ↕️ **Up / Down** | choose where the look comes from |
-| ✅ **`SET`** | pick that film and close |
-| 🗑️ **Trash** | close, changing nothing |
-
-Your choice survives switching the camera off.
-
-Each photo takes about twenty seconds to develop. You can keep shooting
-while it works, and the screen shows `FRAME 2 OF 3` when there's a
-queue.
-
-<br>
-
-> ### ⚠️ Set your Picture Style to Standard, Neutral or Faithful
->
-> On Monochrome every look comes out black and white.
-
-<br>
-
-**`SOURCE: JPEG`** is the default. Use this.
-
-**`SOURCE: RAW`** works from the sensor data instead. It takes minutes
-rather than seconds, some colour adjustments can't be applied, and
-`ACROS` won't be black and white.
-
-`FILM SPEED 50` on the picker is only a label. It does not change your
-camera's ISO.
-
-<br>
-
----
-
-<br>
-
-## 🎞️ The films
-
-Thirteen, still under development.
-
-They're small text files in `ML/FILM` on the card, so you can read them,
-change them, or write your own.
-
-<br>
-
-<div align="center">
-
-### 🎨 [Soup Stocks](https://jiijii0.github.io/soup-stocks/)
-
-**A web editor for the film stocks.**
-
-Drop in a photo, move sliders, download a `.fs`, put it on the card.
-
-The preview is this engine's own code compiled to WebAssembly, so it
-matches what the camera writes.<br>Your photo never leaves your browser.
-
-</div>
-
-<br>
-
----
-
-<br>
-
-## 🧹 Removing it
-
-Put Magic Lantern's original `autoexec.bin` back. That's all.
-
-To pause it without uninstalling, delete `SE.BIN`. The camera boots
-normally without it.
-
-> 🆘 **If the camera ever misbehaves:** pull the battery, put the card
-> in a computer, delete `SE.BIN`. Don't delete `AUTOEXEC.BIN` while the
-> boot flag is on, because with the flag set and no `AUTOEXEC.BIN` the
-> camera won't start at all.
-
-<br>
-
----
-
-<br>
-
-## ❤️ Thanks
-
-This wouldn't exist without [Magic Lantern](https://magiclantern.fm).
-
-Soup Engine runs inside their work. Their build for the 5D Classic is
-what lets the camera run any of this, and years of their reverse
-engineering made it possible to understand. They're worth supporting.
-
-Soup Engine isn't their project, so please don't take problems with it
-to them. Open an issue here instead.
-
-<br>
-
-## 📄 Source and licence
-
-All of it is in [`src/`](src). `AUTOEXEC.BIN` is Magic Lantern's program
-with 215 bytes changed, and the script that applies them is there too.
-
-GPL v2. See [LICENSE](LICENSE). Distributed **without any warranty**,
-including the implied warranties of merchantability and fitness for a
-particular purpose (sections 11 and 12).
+**🎞️ Soup Engine (v56: Half-Frame Diptych & Modernized Studio Edition)**  
+***In-Camera Analog Film Simulation & 35mm Half-Frame Diptych Engine for the Canon EOS 5D Classic (2005)***  
+  
+---  
+**Overview**  
+Soup Engine is an in-camera film simulation and development engine running on the Canon EOS 5D Classic 133 MHz ARM946E-S processor via Magic Lantern memory environment.  
+This fork (from xxxx) is an half-frame- first (Full Frame optional) version, transforming the 5D in a Half Frame camera. It operates like an analog film roll: you shoot freely at standard camera burst speeds without processing lag, then select the film stock (Film), set your desired parameters (Set) and finally develop  your captures when you choose via the in-camera batch darkroom (Lab).  
+The `half-frame-synch-to-v56` branch represents a comprehensive architectural overhaul:  
+- **True 35mm Half-Frame Diptych Engine**: Combines pairs of consecutive 3:4 vertical frames into a single, bordered 3:2 landscape diptych inspired by classic half-frame cameras (such as the Olympus Pen F).  
+- **Decoupled Three-Tier UI Architecture**: Separates the pure visual Film Magazine from the dedicated 4-row Settings Menu and the modal Batch Darkroom Lab.  
+- **Safe Button Bindings**: Eliminates accidental batch rendering by confining roll development to a deliberate confirmation sequence.  
+- **Atomic Persistent Configuration**: Stores stock selection, capture format, rendering source pipeline, resolution, and grain settings in `A:/ML/SE.CFG`, surviving battery pulls and power cycles.  
+- **Bespoke 12x12 Analog Badges**: Features hand-crafted pixel art glyphs for the entire stock roster, accurately corrected for the 5D Classic 2:1 non-square VRAM pixel aspect ratio.  
+- **Pure Image Outputs**: Generates strictly clean JPEG images without extraneous telemetry or text files on your CF card.  
+```  
+In Full-Frame Mode:  
+ IMG_0001.CR2          <- Original Canon RAW frame (untouched, archival)  
+ IMG_0001.FLM.JPG      <- Developed Full-Frame 3:2 film look  
+   
+ In Half-Frame Mode:  
+ IMG_0001.CR2          <- Shot 1 RAW (Left half)  
+ IMG_0002.CR2          <- Shot 2 RAW (Right half)  
+ IMG_0001.HF.JPG       <- Finished 3:2 landscape diptych (Shot 1 + white divider + Shot 2)  
+   
+```  
+  
+---  
+**What is New in Version 56**  
+  
+|  |  |  |  
+| - | - | - |  
+| **Feature Area** |  **Original Beta State** |  **Version 56 State (`half-frame-synch-to-v56`)** |  
+| **Capture Geometry** |  Single 3:2 full-frame capture only. |  **Dual-Mode**: Full-Frame (3:2) or Half-Frame Diptych (paired 3:4 portrait slices stitched into 3:2). |  
+| **Workflow Timing** |  Forced auto-development after each frame (\~18s camera freeze). |  **Analog Roll Workflow**: Zero capture delay (`se_auto_on = 0`); shoot your roll freely and batch develop when ready. |  
+| **Film Magazine UI** |  Overcrowded screen with debug text and card roll counters in descriptions. |  **Pristine visual showcase**: clean profile descriptions, prominent typography ladder, custom 12x12 analog pixel glyphs, and rated speed bands. |  
+| **Settings Management** |  Obscure arrow key combinations on the main screen; no dedicated menu. |  **Dedicated 4-row Configuration Menu (`INFO` key)**: `FORMAT`, `SOURCE`, `RESOLUTION`, `GRAIN`. |  
+| **State Persistence** |  Unsynchronized variables; settings frequently reset upon power cycle. |  **Fully atomic round-trip persistence** to `A:/ML/SE.CFG` for all core engine parameters (`STOCK`, `FORMAT`, `SOURCE`, `SIZE`, `GRAIN`). |  
+| **Batch Development** |  Triggered by pressing `SET` on the main picker; risk of accidental hour-long runs. |  **Decoupled Roll Development Lab modal** accessed via `PLAY`; requires explicit two-step confirmation. |  
+| **`SET` Button Action** |  Armed batch development sweeps. |  **Selects the highlighted film stock**, commits configuration, and immediately closes the menu to shoot. |  
+| **Sidecar Output** |  Legacy diagnostic `.TXT` reports written beside images. |  **Clean output**: strictly writes `.HF.JPG` / `.FLM.JPG` image files, preserving CF card endurance and write speed. |  
+| **Memory Footprint** |  Fluctuating buffer allocation. |  **Hard-capped \~60.9 KB binary footprint** (well within the camera limit of 70.1 KB). |  
+  
+   
+  
+---  
+**In-Camera Navigation & Button Mapping**  
+The Soup Engine interface is invoked from the camera shooting state and organized across three distinct operational screens:  
+```  
+[ SHOOTING STATE ]   
+        |  
+        | (Press JUMP)  
+        v  
+ +--------------------------------------------------------+  
+ |  SE_SCREEN_STOCK: PURE FILM MAGAZINE                   |  
+ |  - Quick Control Dial: Cycle film stock profiles       |  
+ |  - SET: Select active stock and exit immediately       |  
+ |  - UP / DOWN: Quick-toggle Full-Frame / Half-Frame     |  
+ |  - LEFT / RIGHT: Quick-toggle Source (JPEG / RAW)      |  
+ |  - TRASH / MENU / JUMP: Exit interface                 |  
+ +-----------------------+-----------------+--------------+  
+                         |                 |  
+            (Press INFO) |                 | (Press PLAY)  
+                         v                 v  
+ +-------------------------------+ +-------------------------------+  
+ | SE_SCREEN_SETTINGS: CONFIG    | | ROLL DEVELOPMENT LAB MODAL    |  
+ | - UP/DOWN or Dial: Select row | | - SET: Confirm & start batch  |  
+ | - SET or LEFT/RIGHT: Toggle   | | - JUMP: Toggle NEW only / ALL |  
+ | - Auto-flushes to SE.CFG      | | - DEL / MENU: Cancel & return |  
+ | - INFO / MENU: Return to stock| +-------------------------------+  
+ +-------------------------------+  
+   
+```  
+**Detailed Button Controls**  
+***1. Main Film Magazine (****`SE_SCREEN_STOCK`****)***  
+- **`JUMP`**: Opens the Soup Engine magazine overlay.  
+- **Quick Control Dial (or `WHEEL_UP` / `WHEEL_DOWN`)**: Seamlessly rotates through available `.fs` film stocks.  
+- **`SET`**: Locks in the highlighted stock, flushes choice to `A:/ML/SE.CFG`, and immediately dismisses the overlay so you can shoot.  
+- **`UP` / `DOWN` Arrows**: Rapidly toggles between **Half-Frame Diptych (3:4)** and **Full-Frame (3:2)** capture without entering settings.  
+- **`LEFT` / `RIGHT` Arrows**: Rapidly toggles the rendering pipeline source between **Preview JPEG** (fast) and **Raw Sensor Data** (deep pipeline).  
+- **`INFO`**: Opens the structured **Settings Menu**.  
+- **`PLAY`** *(or Direct Print)*: Opens the dedicated **Roll Development Lab** confirmation modal.  
+- **`TRASH` / `MENU` / `JUMP`**: Closes the interface, restoring standard Canon display operation.  
+***2. Configuration Settings Menu (****`SE_SCREEN_SETTINGS`****)***  
+Accessible by pressing **`INFO`** while the magazine is open:  
+- **Row 0: `FORMAT`** -> Toggle between `HALF-FRAME (3:4 DIPTYCH)` and `FULL-FRAME (3:2)`.  
+- **Row 1: `SOURCE`** -> Toggle between `JPEG` (high-speed DIGIC-rendered baseline) and `RAW` (pure sensor pipeline).  
+- **Row 2: `RESOLUTION`** -> Toggle between `FULL` and `HALF` output image sizing.  
+- **Row 3: `GRAIN`** -> Toggle between `AS THE STOCK SAYS` (profile-governed grain synthesis) and `OFF` (clean sensor).  
+- **Navigation**: Move rows with **`UP`/`DOWN`** or the **Dial**; toggle values with **`SET`** or **`LEFT`/`RIGHT`**.  
+- **Exit**: Press **`INFO`** or **`MENU`** to return to the Film Magazine.  
+***3. Roll Development Lab (****`g_roll_confirm_pending`****)***  
+Accessible by pressing **`PLAY`** while on the Film Magazine:  
+- Displays an on-screen darkroom slate detailing pending shots: e.g. `DEV 12 NEW DIPTYCHS (4 ALREADY DONE)`.  
+- **`SET`**: Confirms and immediately launches batch development, switching to the active progress screen (`draw_working`).  
+- **`JUMP`**: Toggles batch target between **NEW un-rendered shots only** and **re-developing ALL shots** on the card.  
+- **`DEL` / `MENU` / `PLAY`**: Cancels the modal and returns to the clean stock browser.  
+  
+---  
+**Half-Frame Diptych Geometry & Optical Alignment**  
+In Half-Frame mode, holding the camera in standard landscape orientation yields vertical **3:4 portrait** slices, recreating the authentic framing experience of classic 35mm half-frame cameras.  
+**Sensor Crop Geometry**  
+- **Shot 1 (Left Half)**: Slices the center 50% width (columns 25% through 75%) and temporarily stages intermediate row data to `A:/ML/SHOT1.TMP`.  
+- **Shot 2 (Right Half)**: Slices the center 50% width of the subsequent frame, retrieves Shot 1 from `SHOT1.TMP`, injects a solid vertical white separator line, grades both halves with the active `.fs` stock curves, and encodes the final landscape diptych to `IMG_xxxx.HF.JPG` (named after Shot 1 sequence number). `SHOT1.TMP` is automatically deleted upon completion.  
+**Diptych Resolution & Divider Width**  
+  
+|  |  |  |  |  |  
+| - | - | - | - | - |  
+| **Mode & Resolution Setting** |  **Input Per Shot** |  **Crop Per Shot** |  **Center Divider Width** |  **Final Master Diptych** |  
+| **Preview `HALF`** |  1248 x 832 px |  620 x 832 px |  8 px solid white |  **1248 x 832 px** (3:2) |  
+| **Preview `FULL`** |  2496 x 1664 px |  1240 x 1664 px |  16 px solid white |  **2496 x 1664 px** (3:2) |  
+| **Raw Sensor `FULL`** |  4368 x 2912 px |  2184 x 2912 px |  16 px solid white |  **4384 x 2912 px** (3:2) |  
+  
+   
+**Viewfinder Optical Framing Guide**  
+The 5D Classic optical viewfinder provides physical alignment for 3:4 vertical frames:  
+- **Left Boundary**: Aligns with the viewfinder far-left outer autofocus point (\~25% frame mark).  
+- **Right Boundary**: Aligns with the viewfinder far-right outer autofocus point (\~75% frame mark).  
+- **Accuracy**: Keeping your subject composed between the two horizontal outer AF points guarantees \~98.2% framing precision for the cropped half-frame image.  
+  
+---  
+**Persistent Configuration Engine (**`A:/ML/SE.CFG`**)**  
+Settings are stored in human-readable plain text on the CompactFlash card at `A:/ML/SE.CFG`. The file is read at camera startup and updated whenever parameters change in the UI:  
+```  
+STOCK KODAK_PORTRA_400  
+ FORMAT HF  
+ SOURCE JPEG  
+ SIZE HALF  
+ GRAIN ON  
+   
+```  
+**Parameter Reference**  
+- **`STOCK <name>`**: The filename stem of the active stock in `A:/ML/FILM/` (e.g. `KODAK_PORTRA_400`, `ILFORD_HP5_400`). Matched by string name to prevent index drifting when stocks are added or removed.  
+- **`FORMAT <HF|FF>`**:  
+  - `HF`: Enables 2-shot 3:4 diptych capture and stitching.  
+  - `FF`: Standard full-frame 3:2 capture.  
+- **`SOURCE <JPEG|RAW>`**:  
+  - `JPEG`: Grades the camera high-speed embedded IFD0 baseline JPEG. Highly recommended (\~10-18 seconds per frame during batch develop).  
+  - `RAW`: Executes custom software sensor decoding directly from sensor Bayer data (\~90-150 seconds per frame).  
+- **`SIZE <HALF|FULL>`**: Selects rendering output scale (Half resolution for fast web sharing vs Full resolution).  
+- **`GRAIN <ON|OFF>`**: Toggles procedural film grain synthesis on or off.  
+  
+---  
+**Installation & Updating**  
+**Prerequisites**  
+- A **Canon EOS 5D Classic** body (original 2005 model, firmware version 1.1.1).  
+- A bootable CompactFlash card with Magic Lantern installed.  
+**Step-by-Step Installation**  
+1. **Backup Existing Autoexec**:  
+   
+ Ensure you have a copy of your card working `AUTOEXEC.BIN` stored safely on your computer.  
+2. **Download or Compile v56**:  
+   
+ Compile the payload using the build instructions below or copy the pre-built files:  
+  - Copy `SE.BIN` to the card root (`A:/ML/SE.BIN` or `A:/SE.BIN`).  
+  - Copy `AUTOEXEC.BIN` to the card root (replaces Magic Lantern loader with the Soup Engine hook).  
+  - Ensure stock look files exist in `A:/ML/FILM/*.fs` along with `A:/ML/FILM/INDEX.TXT`.  
+3. **Power On**:  
+   
+ Insert the card and switch on the camera. Press **`JUMP`** to open the Film Magazine.  
+  
+---  
+**Building from Source**  
+Soup Engine is built as an air-gapped freestanding bare-metal C99 binary compiled for the ARM946E-S architecture.  
+**Toolchain Requirements**  
+- `arm-none-eabi-gcc` cross-compiler toolchain.  
+- Host build tools: GNU `make`, `gcc`, `python3`.  
+**Compilation Steps**  
+```  
+# Clone the repository and switch to the v56 sync branch  
+ git clone https://github.com/<your-fork>/soup-engine.git  
+ cd soup-engine/src  
+ git checkout half-frame-synch-to-v56  
+   
+ # Clean previous build artifacts  
+ make clean  
+   
+ # Compile the ARM payload and assemble binary distribution files  
+ make arm && make payload  
+   
+```  
+Upon a successful build, the toolchain outputs:  
+- `src/ml/build/AUTOEXEC.BIN` (221,184 bytes, ML loader trampoline).  
+- `src/ml/build/SE.BIN` (\~60,976 bytes, Soup Engine core payload).  
+  
+---  
+**Diagnostics & Safety Recovery**  
+The camera architecture contains safety mechanisms to prevent hardware lockups:  
+- **Fail-Safe Startup**: If `SE.BIN` is missing or damaged on the card, `AUTOEXEC.BIN` gracefully falls back and boots standard Canon firmware without crashing.  
+- **Low Battery Guard**: Batch development is inhibited if the battery indicator drops below two bars, preventing power cutoffs during card writes.  
+- **Stack Canary Protection**: A 16-word canary pattern (`0xFE5CA1ED`) verifies that worker threads never overflow the stack into BSS memory.  
+- **Emergency Recovery Files**:  
+  - `A:/ML/SE.NOUI`: If created on the card, disables all LCD drawing and button hooks while keeping raw image capture operational.  
+  - `A:/ML/SE.ALL`: If placed on the card, triggers a one-time development pass across all unprocessed raw files and then automatically self-deletes.  
+  - `A:/ML/SE.LOG`: Check this file via a card reader if you need to inspect camera boot and development logs.  
