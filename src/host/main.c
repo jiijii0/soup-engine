@@ -2010,6 +2010,21 @@ static int test_jpeg_half(void)
         printf("        flat field at half size: worst error %d of 137\n", wf);
         if (wf > 2) ok = 0;
     }
+    /* and at quarter size, which has its own transform and must hold the
+     * same level: a wrong normalisation there is a uniformly wrong frame */
+    if (!jh_decode(4, 32, 32, half, &ow, &oh) || ow != 8 || oh != 8) {
+        printf("        flat field at quarter size: decoded %dx%d, wanted 8x8\n", ow, oh);
+        ok = 0;
+    } else {
+        int wf = 0;
+        for (x = 0; x < ow * oh * 3; x++) {
+            int d = half[x] - 137;
+            if (d < 0) d = -d;
+            if (d > wf) wf = d;
+        }
+        printf("        flat field at quarter size: worst error %d of 137\n", wf);
+        if (wf > 2) ok = 0;
+    }
 
     /* --- 2. an odd size rounds up rather than dropping a column -------- */
     for (y = 0; y < 37; y++)
@@ -2022,6 +2037,12 @@ static int test_jpeg_half(void)
         ok = 0;
     } else {
         printf("        61x37 at half size: %dx%d, all rows delivered\n", ow, oh);
+    }
+    if (!jh_decode(4, 61, 37, half, &ow, &oh) || ow != 16 || oh != 10) {
+        printf("        61x37 at quarter size: decoded %dx%d, wanted 16x10\n", ow, oh);
+        ok = 0;
+    } else {
+        printf("        61x37 at quarter size: %dx%d, all rows delivered\n", ow, oh);
     }
 
     /* --- 3. smooth content agrees with the full decode, averaged ------- */
@@ -2048,6 +2069,33 @@ static int test_jpeg_half(void)
                     sum += d; n++;
                 }
         printf("        half vs full averaged 2x2: worst %d, mean %.3f\n",
+               worst, n ? (double)sum / n : 0.0);
+        if (worst > 12 || (n && (double)sum / n > 2.0)) ok = 0;
+    }
+
+    /* --- 4. and quarter size against the full decode averaged 4x4 ------ */
+    if (ok && (!jh_decode(4, W, H, half, &ow, &oh) || ow != W / 4 || oh != H / 4)) {
+        printf("        quarter size: decoded %dx%d, wanted %dx%d\n", ow, oh, W / 4, H / 4);
+        ok = 0;
+    }
+    if (ok) {
+        worst = 0; sum = 0; n = 0;
+        for (y = 0; y < oh; y++)
+            for (x = 0; x < ow; x++)
+                for (c = 0; c < 3; c++) {
+                    int i, j, acc = 0;
+                    for (j = 0; j < 4; j++)
+                        for (i = 0; i < 4; i++)
+                            acc += full[((size_t)(y * 4 + j) * W + x * 4 + i) * 3 + c];
+                    {
+                        int avg = (acc + 8) / 16;
+                        int d = half[((size_t)y * ow + x) * 3 + c] - avg;
+                        if (d < 0) d = -d;
+                        if (d > worst) worst = d;
+                        sum += d; n++;
+                    }
+                }
+        printf("        quarter vs full averaged 4x4: worst %d, mean %.3f\n",
                worst, n ? (double)sum / n : 0.0);
         if (worst > 12 || (n && (double)sum / n > 2.0)) ok = 0;
     }
@@ -2309,6 +2357,7 @@ static void usage(void)
         "  --xmp <file.xmp>  apply a Lightroom sidecar in full 3D (software path)\n"
         "  --stock <name>    apply a film stock -- the path the camera will use\n"
         "  --ev <f>          exposure push/pull in stops\n"
+        "  --420             encode 4:2:0, as the 700D does\n"
         "  --quality <1-100> JPEG quality (default 92)\n"
         "  --no-dither       disable the 16->8 ordered dither\n"
         "  --half            half size by Bayer-quad binning (no demosaic at all)\n"
@@ -2394,6 +2443,7 @@ int main(int argc, char **argv)
         else if (strcmp(argv[i], "--xmp") == 0 && i + 1 < argc)     xmp_path = argv[++i];
         else if (strcmp(argv[i], "--stock") == 0 && i + 1 < argc)   stock_path = argv[++i];
         else if (strcmp(argv[i], "--ev") == 0 && i + 1 < argc)      opts.exposure_ev = (float)atof(argv[++i]);
+        else if (strcmp(argv[i], "--420") == 0)                     opts.chroma420 = 1;
         else if (strcmp(argv[i], "--quality") == 0 && i + 1 < argc) opts.jpeg_quality = atoi(argv[++i]);
         else if (strcmp(argv[i], "--no-dither") == 0)               opts.dither = 0;
         else if (strcmp(argv[i], "--scale") == 0 && i + 1 < argc)   opts.scale = atoi(argv[++i]);

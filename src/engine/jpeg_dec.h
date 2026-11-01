@@ -53,6 +53,11 @@ se_err se_jpeg_dec_info(const void *buf, size_t len, se_jdec_info *out);
  * for a fraction of the arithmetic.
  *
  * Dimensions round up, so an odd width keeps its last column.
+ *
+ * scale 4 is the same again, stopped at two points: the top-left 2x2
+ * coefficients, a quarter-size image, 8 multiply-accumulates a block.
+ * For the 700D, whose 18 MP preview and 150 MIPS processor make even
+ * half size a 42-second frame.
  */
 void se_jpeg_scaled_size(int w, int h, int scale, int *ow, int *oh);
 

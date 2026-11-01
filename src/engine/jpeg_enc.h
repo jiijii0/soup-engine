@@ -63,6 +63,9 @@ typedef struct {
     int      outpos;
 
     uint8_t  exifbuf[1024];
+
+    int      chroma420;        /* 4:2:0 rather than 4:4:4 */
+    int      mcu_rows;         /* 16 or 8: rows per strip  */
 } se_jpeg;
 
 /*
@@ -78,6 +81,18 @@ typedef struct {
 se_err se_jpeg_begin(se_jpeg *j, int width, int height, int quality,
                      uint8_t *strip, const se_jpeg_exif *exif,
                      se_jpeg_sink sink, void *ctx);
+
+/*
+ * The same with a choice of chroma sampling. 4:2:0 halves the encoder's
+ * block work and the file size for the same pixels, at the usual cost of
+ * chroma at half resolution -- what every camera JPEG does. The strip is
+ * sixteen rows then, not eight: size it with SE_JPEG_STRIP_BYTES.
+ */
+se_err se_jpeg_begin2(se_jpeg *j, int width, int height, int quality,
+                      uint8_t *strip, const se_jpeg_exif *exif,
+                      se_jpeg_sink sink, void *ctx, int chroma420);
+#define SE_JPEG_STRIP_BYTES(width, chroma420) \
+    ((size_t)((chroma420) ? 16 : 8) * (size_t)(width) * 3)
 
 /* Push `nrows` rows of 8-bit interleaved RGB. Any count is accepted. */
 se_err se_jpeg_write_rows(se_jpeg *j, const uint8_t *rgb, int nrows);

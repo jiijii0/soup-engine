@@ -7,7 +7,7 @@
 # which says nothing about a missing sample.
 SAMPLES := $(wildcard samples/*.CR2) $(wildcard samples/*/*.CR2)
 
-.PHONY: all test test-full test-camera simtest asan arm clean contact payload
+.PHONY: all test test-full test-camera simtest sim700d asan arm clean contact payload card-700d vendor-700d
 
 all:
 	@$(MAKE) -s -C host
@@ -100,12 +100,98 @@ out/previewcheck: $(PREVIEW_SRC) $(wildcard engine/*.h)
 	@mkdir -p out
 	@$(CAMTEST_CC) -o $@ $(PREVIEW_SRC) -lm
 
+# Run the real ml/700d module on the desktop, against a mock of Magic
+# Lantern (tools/sim700d/ml.h stands in for ml/700d/ml.h) with a 3 MB DMA
+# pool, short reads, a real worker thread and a real shutdown flag. It
+# develops a frame and compares it with previewcheck byte for byte, then
+# drives the watcher and the picker. See tools/sim700d/sim.c.
+SIM700D_SRC = tools/sim700d/sim.c ml/700d/soupeng.c ml/700d/develop.c \
+              ml/700d/watch.c ml/700d/screen.c ml/700d/ui.c ml/700d/prints.c
+SIM700D_ENG = engine/se.c engine/wb.c engine/cr2.c engine/color.c engine/debayer.c \
+              engine/lut.c engine/stock.c engine/grade.c engine/jpeg_enc.c \
+              engine/jpeg_dec.c engine/pipeline.c engine/look.c
+
+out/sim700d: $(SIM700D_SRC) tools/sim700d/ml.h ml/700d/soupeng.h $(SIM700D_ENG) $(wildcard engine/*.h)
+	@mkdir -p out
+	@# the module's sources see the mock through <ml.h>; the engine's see the host libc
+	@for f in ml/700d/soupeng.c ml/700d/develop.c ml/700d/watch.c ml/700d/screen.c ml/700d/ui.c ml/700d/prints.c; do \
+	   cc -std=gnu99 -O1 -g $(SDK) -Itools/sim700d -Iml/700d -Iengine -Wall -Wno-unused-function \
+	      -c -o out/sim700d_`basename $$f .c`.o $$f || exit 1; done
+	@cc -std=gnu99 -O1 -g $(SDK) -Itools/sim700d -Iengine -DSE_HOSTED -Wall -Wno-unused-function \
+	   -c -o out/sim700d_sim.o tools/sim700d/sim.c
+	@cc -std=c99 -O1 -g -DSE_HOSTED $(SDK) -Iengine -o $@ \
+	   out/sim700d_sim.o out/sim700d_soupeng.o out/sim700d_develop.o out/sim700d_watch.o out/sim700d_screen.o out/sim700d_ui.o out/sim700d_prints.o \
+	   $(SIM700D_ENG) -lm -lpthread 2>&1 | grep -v 'reducing alignment' || true
+	@test -x $@
+
+# With no raws in samples/ (which is every fresh clone: they are the owner's
+# photos and are not committed) it runs on out/public.CR2, made from one frame
+# of doc/stocks.jpg. SIM700D_SAMPLE=out/public.CR2 picks that one regardless,
+# and it is the only sample whose SE_SIM_DUMP pictures are fit to publish.
+SIM700D_SAMPLE ?= $(or $(firstword $(SAMPLES)),out/public.CR2)
+
+sim700d: all out/previewcheck out/sim700d $(filter out/public.CR2,$(SIM700D_SAMPLE))
+	@sh tools/sim700d.sh $(SIM700D_SAMPLE)
+
+MKCR2_SRC = tools/mkcr2.c engine/se.c engine/jpeg_enc.c engine/jpeg_dec.c
+
+out/mkcr2: $(MKCR2_SRC) $(wildcard engine/*.h)
+	@mkdir -p out
+	@$(CAMTEST_CC) -o $@ $(MKCR2_SRC) -lm
+
+out/public.CR2: out/mkcr2 ../doc/stocks.jpg
+	@./out/mkcr2 ../doc/stocks.jpg $@
+
 # The camera build. Produces two files for the card:
 #   ml/build/AUTOEXEC.BIN  the 2012 binary with 262 bytes changed, same size
 #   ml/build/SE.BIN        the soup engine itself, loaded on demand
 payload:
 	@$(MAKE) -s -C ml/payload
 	@python3 tools/patch-film.py
+
+# The EOS 700D build: a Magic Lantern module, and everything the card
+# needs beside it, in out/card-700d/. Copy that folder's contents onto a
+# card that already has Magic Lantern's 700D build on it. Needs the
+# pinned Magic Lantern checkout (vendor-700d below fetches it) and the
+# Arm toolchain described in ml/700d/Makefile.
+card-700d: vendor-700d
+	@$(MAKE) -s -C ml/700d
+	@rm -rf out/card-700d
+	@mkdir -p out/card-700d/ML/modules out/card-700d/ML/FILM out/card-700d/ML/SETTINGS out/card-700d/ML/DATA
+	@cp ml/700d/build/soupeng.mo out/card-700d/ML/modules/
+	@cp ml/700d/data/SOUPUI.BIN out/card-700d/ML/DATA/
+	@cp stocks/*.fs out/card-700d/ML/FILM/
+	@touch out/card-700d/ML/SETTINGS/soupeng.en
+	@# Magic Lantern's script writes user@host into a module, and these get
+	@# handed around. The patch stops that; a checkout from before it does not.
+	@if strings -a out/card-700d/ML/modules/soupeng.mo | grep -q "`whoami`@"; then \
+	   echo "soupeng.mo carries your user name: delete vendor/magiclantern_simplified and run this again"; \
+	   rm -rf out/card-700d; exit 1; fi
+	@echo "out/card-700d: $$(ls out/card-700d/ML/FILM | wc -l | tr -d ' ') films, soupeng.mo $$(stat -f%z ml/700d/build/soupeng.mo 2>/dev/null || stat -c%s ml/700d/build/soupeng.mo) bytes"
+	@echo "copy the contents of out/card-700d onto the card; eject before removing it"
+
+# Magic Lantern's source, at the commit the camera's 2025-06-20 700D build
+# was made from, with ml/700d/patches/ applied: three small fixes to their
+# module build scripts for current Python and for a module living outside
+# their tree. Nothing of theirs is committed here; this fetches it. Safe to
+# run again: it does nothing once the checkout is at the right commit.
+ML_700D_REPO   = https://github.com/reticulatedpines/magiclantern_simplified
+ML_700D_COMMIT = ed3e7c0df
+ML_700D_DIR    = vendor/magiclantern_simplified
+
+vendor-700d:
+	@if [ ! -d $(ML_700D_DIR)/.git ]; then \
+	   echo "fetching Magic Lantern's source into $(ML_700D_DIR)"; \
+	   git clone -q $(ML_700D_REPO) $(ML_700D_DIR); \
+	 fi
+	@cd $(ML_700D_DIR) && \
+	 if ! git rev-parse -q --verify camera-build >/dev/null; then \
+	   git checkout -q -b camera-build $(ML_700D_COMMIT) && \
+	   git apply ../../ml/700d/patches/magiclantern-build-scripts.patch && \
+	   git -c user.name=soup-engine -c user.email=soup@engine commit -qam \
+	     "modules: build-script fixes from soup-engine/ml/700d/patches" && \
+	   echo "Magic Lantern at $(ML_700D_COMMIT), patched"; \
+	 else git checkout -q camera-build; fi
 
 asan:
 	@$(MAKE) -s -C host asan

@@ -117,6 +117,13 @@ typedef struct {
 static const se_cam_entry g_cams[] = {
     { "Canon EOS 5D",          0x0e6c, 12, { 6347,-479,-972,-8297,15954,2480,-1968,2131,7649 } },
     { "Canon EOS 5D Mark II",  0x3cf0, 14, { 4716, 603,-830,-7798,15474,2480,-1496,1937,6651 } },
+    /*
+     * One body, three names: the EXIF model string depends on the region
+     * the camera was sold in. LibRaw files all three under "EOS 700D".
+     */
+    { "Canon EOS 700D",        0x3c00, 14, { 6602,-841,-939,-4472,12458,2247,-975,2039,6148 } },
+    { "Canon EOS REBEL T5i",   0x3c00, 14, { 6602,-841,-939,-4472,12458,2247,-975,2039,6148 } },
+    { "Canon EOS Kiss X7i",    0x3c00, 14, { 6602,-841,-939,-4472,12458,2247,-975,2039,6148 } },
 };
 
 static const se_cam_entry *cam_lookup(const char *model)
@@ -168,15 +175,35 @@ static void parse_makernote(se_rd *r, uint32_t off, se_cr2_info *out)
              * position of WB_RGGBLevelsAsShot moved with it. Offsets are
              * word indices, cross-checked against ExifTool's Canon tables.
              */
+            /*
+             * Where each preset's RGGB levels start, in se_wb_preset order,
+             * for the versions whose layout has been checked. The rest
+             * assume the presets follow as-shot on a 5-word stride.
+             *
+             * ColorData3 is that stride except at the end: Kelvin sits at
+             * 0x67 and Flash after it at 0x6c. ColorData7 has ten unnamed
+             * entries after Measured, so Daylight is not until 0x80; read
+             * on the stride, DAYLIGHT got a copy of as-shot and CLOUDY got
+             * unity gains. Both read off a real 700D frame, where the
+             * colour temperature beside each preset is 5200, 7000, 6000,
+             * 3200, 3720 and 6272 K.
+             */
+            static const uint16_t wb_cd3[SE_WB_COUNT] =
+                { 0x3f, 0x44, 0x49, 0x4e, 0x53, 0x58, 0x5d, 0x62, 0x6c };
+            static const uint16_t wb_cd7[SE_WB_COUNT] =
+                { 0x3f, 0x44, 0x49, 0x80, 0x85, 0x8a, 0x8f, 0x94, 0x9e };
+            const uint16_t *at = NULL;
             uint32_t idx;
             switch (e.count) {
             case 582:  idx = 25; break;   /* ColorData1: 20D, 350D          */
             case 653:  idx = 24; break;   /* ColorData2: 1D Mk II           */
-            case 796:  idx = 63; break;   /* ColorData3: 5D, 30D, 400D      */
+            case 796:  idx = 63; at = wb_cd3; break; /* ColorData3: 5D, 30D, 400D */
             case 674: case 692: case 702:
             case 1227: case 1250: case 1251:
             case 1337: case 1338: case 1346:
                        idx = 63; break;   /* ColorData4: 50D, 5D Mk II, ... */
+            case 1312: case 1313: case 1316: case 1506:
+                       idx = 63; at = wb_cd7; break; /* ColorData7: 700D, 6D, 5D Mk III, ... */
             default:
                 idx = 63;
                 se_log("cr2: unknown ColorData length %u, assuming offset 63",
@@ -193,14 +220,13 @@ static void parse_makernote(se_rd *r, uint32_t off, se_cr2_info *out)
                     out->wb_present = 1;
             }
             /*
-             * The presets follow as-shot on a 5-word stride: four RGGB
-             * levels then a colour temperature. Verified against ExifTool
-             * on a real EOS 5D frame.
+             * Each preset is four RGGB levels then a colour temperature.
+             * Verified against ExifTool on a real EOS 5D frame.
              */
             {
                 int p;
                 for (p = 0; p < SE_WB_COUNT; p++) {
-                    uint32_t o = idx + (uint32_t)p * 5;
+                    uint32_t o = at ? at[p] : idx + (uint32_t)p * 5;
                     if (o + 4 > e.count) break;
                     out->wb_preset[p][0] = (float)tiff_val(r, &e, o + 0);
                     out->wb_preset[p][1] = (float)tiff_val(r, &e, o + 1);
@@ -995,7 +1021,8 @@ se_err se_cr2_find_preview(const void *buf, size_t len,
     if (bytes) *bytes = sb;
     if (w)     *w     = (int)iw;
     if (h)     *h     = (int)ih;
-    se_log("cr2: preview %ux%u at %u, %u bytes", iw, ih, so, sb);
+    /* %d, not %u: on the camera this is Canon's printf, which has no %u */
+    se_log("cr2: preview %dx%d at %d, %d bytes", (int)iw, (int)ih, (int)so, (int)sb);
     return SE_OK;
 }
 

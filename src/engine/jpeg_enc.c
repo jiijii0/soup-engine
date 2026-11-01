@@ -350,8 +350,10 @@ static void fdct(int32_t *d)
         tmp10 = tmp0 + tmp3; tmp13 = tmp0 - tmp3;
         tmp11 = tmp1 + tmp2; tmp12 = tmp1 - tmp2;
 
-        p[0] = (tmp10 + tmp11) << PASS1_BITS;
-        p[4] = (tmp10 - tmp11) << PASS1_BITS;
+            /* multiplied, not shifted: a left shift of a negative value is
+         * undefined in C, and the sanitiser said so twice a frame */
+        p[0] = (tmp10 + tmp11) * (1 << PASS1_BITS);
+        p[4] = (tmp10 - tmp11) * (1 << PASS1_BITS);
 
         z1 = (tmp12 + tmp13) * FIX_0_541196100;
         p[2] = DESCALE(z1 + tmp13 * FIX_0_765366865, CONST_BITS - PASS1_BITS);
@@ -494,9 +496,9 @@ static void emit_dht(se_jpeg *j, int tc, int th,
     jo_bytes(j, vals, (size_t)total);
 }
 
-se_err se_jpeg_begin(se_jpeg *j, int width, int height, int quality,
-                     uint8_t *strip, const se_jpeg_exif *exif,
-                     se_jpeg_sink sink, void *ctx)
+se_err se_jpeg_begin2(se_jpeg *j, int width, int height, int quality,
+                      uint8_t *strip, const se_jpeg_exif *exif,
+                      se_jpeg_sink sink, void *ctx, int chroma420)
 {
     int i, scale;
     static const uint8_t jfif[] = {
@@ -512,6 +514,8 @@ se_err se_jpeg_begin(se_jpeg *j, int width, int height, int quality,
     j->width = width; j->height = height;
     j->strip = strip;
     j->quality = SE_CLAMP(quality, 1, 100);
+    j->chroma420 = chroma420 ? 1 : 0;
+    j->mcu_rows  = j->chroma420 ? 16 : 8;
 
     /* Standard IJG quality scaling. */
     scale = (j->quality < 50) ? (5000 / j->quality) : (200 - j->quality * 2);
@@ -555,7 +559,7 @@ se_err se_jpeg_begin(se_jpeg *j, int width, int height, int quality,
     jo_byte(j, 0x01);
     for (i = 0; i < 64; i++) jo_byte(j, j->qt[1][g_zigzag[i]]);
 
-    /* SOF0, 4:4:4 */
+    /* SOF0: 4:4:4, or 4:2:0 with Y sampled 2x2 against the chroma */
     jo_u16(j, 0xffc0);
     jo_u16(j, 8 + 3 * 3);
     jo_byte(j, 8);
@@ -564,7 +568,7 @@ se_err se_jpeg_begin(se_jpeg *j, int width, int height, int quality,
     jo_byte(j, 3);
     for (i = 0; i < 3; i++) {
         jo_byte(j, (uint8_t)(i + 1));
-        jo_byte(j, 0x11);                       /* no subsampling */
+        jo_byte(j, (uint8_t)(i == 0 && j->chroma420 ? 0x22 : 0x11));
         jo_byte(j, (uint8_t)(i == 0 ? 0 : 1));  /* quant table id */
     }
 
@@ -624,6 +628,61 @@ static void encode_strip(se_jpeg *j)
 }
 
 
+/*
+ * The same for 4:2:0: a 16x16 MCU is four Y blocks and one block each of
+ * Cb and Cr, averaged over 2x2. Half the blocks of 4:4:4 for the same
+ * pixels, so about half the transform and entropy work, and a file about
+ * a third smaller -- and it is what every camera JPEG does. The strip is
+ * 16 rows here; SE_JPEG_STRIP_BYTES says how much to give it.
+ */
+static void encode_strip420(se_jpeg *j)
+{
+    int w = j->width;
+    int mcux, bx, by, q;
+
+    for (mcux = 0; mcux * 16 < w; mcux++) {
+        int32_t Y[4][64], Cb[64], Cr[64];
+        int32_t cb[256], cr[256];           /* per pixel, 16x16 */
+        int x0 = mcux * 16;
+        for (by = 0; by < 16; by++) {
+            const uint8_t *src = j->strip + (size_t)by * w * 3;
+            for (bx = 0; bx < 16; bx++) {
+                int x = x0 + bx;
+                int r, g, b, o = (by >> 3) * 2 + (bx >> 3);
+                if (x >= w) x = w - 1;           /* replicate the right edge */
+                r = src[x * 3 + 0];
+                g = src[x * 3 + 1];
+                b = src[x * 3 + 2];
+                Y[o][(by & 7) * 8 + (bx & 7)] =
+                    (( 19595 * r + 38470 * g +  7471 * b + 32768) >> 16) - 128;
+                cb[by * 16 + bx] = (-11056 * r - 21712 * g + 32768 * b + 32768) >> 16;
+                cr[by * 16 + bx] = ( 32768 * r - 27440 * g -  5328 * b + 32768) >> 16;
+            }
+        }
+        for (by = 0; by < 8; by++)
+            for (bx = 0; bx < 8; bx++) {
+                int i = (by * 2) * 16 + bx * 2;
+                Cb[by * 8 + bx] = (cb[i] + cb[i + 1] + cb[i + 16] + cb[i + 17] + 2) >> 2;
+                Cr[by * 8 + bx] = (cr[i] + cr[i + 1] + cr[i + 16] + cr[i + 17] + 2) >> 2;
+            }
+        for (q = 0; q < 4; q++) encode_block(j, Y[q], 0, 0, g_dc_lum, g_ac_lum);
+        encode_block(j, Cb, 1, 1, g_dc_chr, g_ac_chr);
+        encode_block(j, Cr, 1, 2, g_dc_chr, g_ac_chr);
+    }
+}
+
+static void encode_mcu_row(se_jpeg *j)
+{
+    if (j->chroma420) encode_strip420(j); else encode_strip(j);
+}
+
+se_err se_jpeg_begin(se_jpeg *j, int width, int height, int quality,
+                     uint8_t *strip, const se_jpeg_exif *exif,
+                     se_jpeg_sink sink, void *ctx)
+{
+    return se_jpeg_begin2(j, width, height, quality, strip, exif, sink, ctx, 0);
+}
+
 se_err se_jpeg_write_rows(se_jpeg *j, const uint8_t *rgb, int nrows)
 {
     int i;
@@ -634,8 +693,8 @@ se_err se_jpeg_write_rows(se_jpeg *j, const uint8_t *rgb, int nrows)
                (size_t)j->width * 3);
         j->strip_rows++;
         j->rows_done++;
-        if (j->strip_rows == 8) {
-            encode_strip(j);
+        if (j->strip_rows == j->mcu_rows) {
+            encode_mcu_row(j);
             j->strip_rows = 0;
         }
     }
@@ -647,13 +706,13 @@ se_err se_jpeg_end(se_jpeg *j)
     if (j->strip_rows) {
         /* pad the final partial MCU row by repeating the last line */
         int w = j->width;
-        while (j->strip_rows < 8) {
+        while (j->strip_rows < j->mcu_rows) {
             memcpy(j->strip + (size_t)j->strip_rows * w * 3,
                    j->strip + (size_t)(j->strip_rows - 1) * w * 3,
                    (size_t)w * 3);
             j->strip_rows++;
         }
-        encode_strip(j);
+        encode_mcu_row(j);
         j->strip_rows = 0;
     }
     jo_bit_flush(j);

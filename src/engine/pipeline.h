@@ -65,6 +65,7 @@ typedef struct {
     float grain_amount;
     float grain_size;
     float grain_frequency;
+    int   chroma420;       /* encode 4:2:0 rather than 4:4:4 (the 700D)  */
 } se_dev_opts;
 
 void se_dev_opts_default(se_dev_opts *o);

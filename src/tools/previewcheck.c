@@ -13,7 +13,7 @@
  * inside the decoder as a 4-point IDCT, and it had to move in both files at
  * once or the comparison would have failed for the wrong reason.
  *
- * usage: previewcheck <in.CR2> <stock.fs> <scale> [out.jpg]
+ * usage: previewcheck <in.CR2> <stock.fs> <scale> [out.jpg] [420]
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -76,6 +76,8 @@ int main(int argc, char **argv)
     FILE *sf, *of; char *text; long tl;
     int scale = (argc > 3) ? atoi(argv[3]) : 2, ow, oh;
     const char *outp = (argc > 4) ? argv[4] : "/dev/null";
+    /* "420" as a fifth argument encodes 4:2:0, as the 700D does */
+    int c420 = (argc > 5) && strcmp(argv[5], "420") == 0;
 
     if (!f) { puts("no cr2"); return 2; }
     fseek(f, 0, SEEK_END); L = ftell(f); rewind(f);
@@ -120,8 +122,8 @@ int main(int argc, char **argv)
     ex.exposure_time = info.exposure_time; ex.aperture = info.aperture;
     ex.iso = info.iso;
     {
-        uint8_t *strip = SE_NEW(&ar, uint8_t, (size_t)8 * ow * 3);
-        if (se_jpeg_begin(enc, ow, oh, 88, strip, &ex, wr, of) != SE_OK) {
+        uint8_t *strip = SE_NEW(&ar, uint8_t, SE_JPEG_STRIP_BYTES(ow, c420));
+        if (se_jpeg_begin2(enc, ow, oh, 88, strip, &ex, wr, of, c420) != SE_OK) {
             puts("enc fail"); return 2;
         }
     }

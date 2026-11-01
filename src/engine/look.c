@@ -25,6 +25,25 @@ static int luma8(int r, int g, int b)
  * This is the same construction pipeline.c uses on the raw path, kept
  * deliberately identical so a stock grains the same from either source.
  */
+/*
+ * Exact division by a small variable, as a multiply.
+ *
+ * ARM946E-S has no divide instruction, so `n / d` with d not known at
+ * compile time is a library call of some forty cycles -- and the halation
+ * mask, the glow and the grain each had one or two per pixel. With
+ * m = ceil(2^24 / d), (n * m) >> 24 equals n / d exactly for every
+ * 0 <= n < 2^16 and 1 <= d < 256 (the error of m is below d, so n times
+ * it stays below 2^24), which covers every use below. The product needs
+ * 64 bits, which is one umull. Exact, so the pixels are the same bytes
+ * they were, and tools/previewcheck's hashes say so.
+ */
+static uint32_t se_recip24(int d)
+{
+    if (d < 1) d = 1;
+    return (uint32_t)((16777216u + (uint32_t)d - 1) / (uint32_t)d);
+}
+#define SE_DIV24(n, m) ((int)(((uint64_t)(uint32_t)(n) * (m)) >> 24))
+
 static unsigned grain_hash(unsigned x, unsigned y, unsigned seed)
 {
     unsigned h = x * 374761393u + y * 668265263u + seed * 2246822519u;
@@ -507,11 +526,13 @@ static void mask_row(const se_look *lk, const uint8_t *row, int w,
     long sum = 0;
     int  span = 255 - lk->hal_thresh;
     if (span < 1) span = 1;
+    {
+    uint32_t rspan = se_recip24(span), rwin = se_recip24(win);
 
     for (x = 0; x < w; x++) {
         int y = luma8(row[x * 3], row[x * 3 + 1], row[x * 3 + 2]);
         int v = y - lk->hal_thresh;
-        scratch[x] = (uint8_t)(v <= 0 ? 0 : (v * 255) / span);
+        scratch[x] = (uint8_t)(v <= 0 ? 0 : SE_DIV24(v * 255, rspan));
     }
 
     /* prime the window with the left edge clamped */
@@ -519,9 +540,10 @@ static void mask_row(const se_look *lk, const uint8_t *row, int w,
         sum += scratch[x < 0 ? 0 : (x >= w ? w - 1 : x)];
     for (x = 0; x < w; x++) {
         int add = x + rad + 1, sub = x - rad;
-        dst[x] = (uint8_t)(sum / win);
+        dst[x] = (uint8_t)SE_DIV24(sum, rwin);
         sum += scratch[add >= w ? w - 1 : add];
         sum -= scratch[sub < 0 ? 0 : sub];
+    }
     }
 }
 
@@ -531,8 +553,9 @@ static void add_glow(const se_look *lk, uint8_t *row, int w,
 {
     int x;
     if (nrows < 1) nrows = 1;
+    uint32_t rrows = se_recip24(nrows);
     for (x = 0; x < w; x++) {
-        int g = colsum[x] / nrows;              /* 0..255 */
+        int g = SE_DIV24(colsum[x], rrows);     /* 0..255 */
         int a, room;
         if (g <= 0) continue;
         a = (g * lk->hal_amount) / 100;
@@ -571,10 +594,12 @@ static void grain_row(const se_look *lk, uint8_t *row, int w, int y)
      * as emulsion and started reading as sensor noise, which is the one
      * thing grain must not look like. */
     int amp = (lk->grain * SE_GRAIN_AMP) / 100;
+    unsigned yc = (unsigned)(y / cell), xc = 0;
+    int cnt = 0;
     if (amp <= 0) return;
     for (x = 0; x < w; x++) {
-        int n = (int)(grain_hash((unsigned)(x / cell), (unsigned)(y / cell),
-                                 0x5EEDu) & 0xFFFF);
+        int n = (int)(grain_hash(xc, yc, 0x5EEDu) & 0xFFFF);
+        if (++cnt == cell) { cnt = 0; xc++; }   /* x / cell, without dividing */
         int d = ((n - 32768) * amp) >> 15;
         int c;
         for (c = 0; c < 3; c++) {

@@ -49,7 +49,7 @@ size_t se_develop_scratch_size(const se_cr2_info *info)
                      + (size_t)rows * info->raw_width * sizeof(uint16_t) /* stage */
                      + (size_t)SE_BAND_ROWS * aw * 3 * sizeof(uint16_t)  /* rgb   */
                      + (size_t)SE_BAND_ROWS * aw * 3                     /* rgb8  */
-                     + (size_t)8 * aw * 3                                /* strip */
+                     + SE_JPEG_STRIP_BYTES(aw, 1)                         /* strip, 4:2:0's 16 rows */
                      + sizeof(se_lut1);                                  /* curve */
         if (need > worst) worst = need;
     }
@@ -144,7 +144,7 @@ se_err se_develop(const se_cr2_info *info, const se_raw_src *src,
     band   = SE_NEW(arena, uint16_t, (size_t)band_rows_max * bstride);
     rgb    = SE_NEW(arena, uint16_t, (size_t)SE_BAND_ROWS * aw * 3);
     rgb8   = SE_NEW(arena, uint8_t,  (size_t)SE_BAND_ROWS * aw * 3);
-    strip  = SE_NEW(arena, uint8_t,  (size_t)8 * aw * 3);
+    strip  = SE_NEW(arena, uint8_t,  SE_JPEG_STRIP_BYTES(aw, opts->chroma420));
     encode = SE_NEW(arena, se_lut1,  1);
     /* ~5 KB; an ML task stack will not take it */
     jpg    = opts->rows ? NULL : SE_NEW(arena, se_jpeg, 1);
@@ -179,8 +179,8 @@ se_err se_develop(const se_cr2_info *info, const se_raw_src *src,
         ex.aperture      = info->aperture;
         ex.iso           = info->iso;
 
-        rc = se_jpeg_begin(jpg, aw, ah, opts->jpeg_quality, strip, &ex,
-                           sink, sink_ctx);
+        rc = se_jpeg_begin2(jpg, aw, ah, opts->jpeg_quality, strip, &ex,
+                           sink, sink_ctx, opts->chroma420);
         if (rc != SE_OK) return rc;
     }
 

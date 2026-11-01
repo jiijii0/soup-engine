@@ -354,6 +354,46 @@ static void jd_idct4(const int *in, uint8_t *out, int stride)
     }
 }
 
+/*
+ * And stopped at two: the top-left 2x2 coefficients in, a 2x2 block out,
+ * the image at quarter size. The same identity one step further -- the
+ * N=2 basis is every fourth row of the N=8 basis restricted to the first
+ * two columns, jd_ct[4u][x] for u,x < 2 -- and the same normalisation,
+ * DC alone giving F00/8, so the shifts are again unchanged. 8 multiply-
+ * accumulates a block.
+ *
+ * This exists for the 700D, whose preview is 18 MP and whose processor
+ * sustains about 150 M instructions a second: a half-size frame took 42
+ * seconds there, and a quarter-size one (1296x864, larger than the 5D's
+ * default output) is the "quick shareable frame" that body can deliver
+ * in a fraction of that. `filmdev selftest` holds it to the same three
+ * assertions as the half-size transform.
+ */
+static void jd_idct2(const int *in, uint8_t *out, int stride)
+{
+    int tmp[4];
+    int u, x, y;
+
+    if (jd_flat(in, 2)) { jd_fill_block(out, stride, 2, in[0]); return; }
+
+    for (x = 0; x < 2; x++) {
+        for (y = 0; y < 2; y++) {
+            int acc = 0;
+            for (u = 0; u < 2; u++) acc += jd_ct[u * 4][y] * in[u * 8 + x];
+            tmp[y * 2 + x] = JD_DESCALE(acc, 11);
+        }
+    }
+    for (y = 0; y < 2; y++) {
+        uint8_t *o = out + y * stride;
+        for (x = 0; x < 2; x++) {
+            int acc = 0;
+            for (u = 0; u < 2; u++) acc += jd_ct[u * 4][x] * tmp[y * 2 + u];
+            acc = JD_DESCALE(acc, 17) + 128;
+            o[x] = (uint8_t)(acc < 0 ? 0 : acc > 255 ? 255 : acc);
+        }
+    }
+}
+
 /* ===================================================================== */
 /* Frame state                                                            */
 /* ===================================================================== */
@@ -548,7 +588,7 @@ static se_err jd_run(const uint8_t *d, size_t len,
     int       i, mx, my, blk[64];
     uint8_t  *rgb;
 
-    if (scale != 1 && scale != 2) return SE_E_UNSUPPORTED;
+    if (scale != 1 && scale != 2 && scale != 4) return SE_E_UNSUPPORTED;
 
     s = SE_NEW(a, jd_state, 1);
     if (!s) return SE_E_NOMEM;
@@ -648,8 +688,9 @@ static se_err jd_run(const uint8_t *d, size_t len,
                             uint8_t *o = c->plane
                                 + (size_t)by * s->bs * c->pw
                                 + (size_t)(mx * c->hs + bx) * s->bs;
-                            if (s->bs == 8) jd_idct(blk, o, c->pw);
-                            else            jd_idct4(blk, o, c->pw);
+                            if (s->bs == 8)      jd_idct(blk, o, c->pw);
+                            else if (s->bs == 4) jd_idct4(blk, o, c->pw);
+                            else                 jd_idct2(blk, o, c->pw);
                         }
                     }
             }
@@ -710,7 +751,7 @@ static se_err jd_run(const uint8_t *d, size_t len,
 
 void se_jpeg_scaled_size(int w, int h, int scale, int *ow, int *oh)
 {
-    int bs = (scale == 2) ? 4 : 8;
+    int bs = (scale == 4) ? 2 : (scale == 2) ? 4 : 8;
     /* round up: a 2495-wide frame still delivers its last column */
     if (ow) *ow = (w * bs + 7) / 8;
     if (oh) *oh = (h * bs + 7) / 8;
