@@ -67,21 +67,26 @@ extern const uint8_t se_ui_font[SE_FONT_GLYPHS][SE_FONT_W];
  * tools/fb2png.py carries the same RGB values, so a desktop preview is what
  * the panel shows.
  */
+/*
+ * The Canon EOS 5D Classic native palette (grounded in 8885.jpg).
+ * Obsidian pitch-black ground, dark charcoal panels, Canon Tri-Color
+ * navigation tabs (Red Shoot, Blue Play, Orange Setup), and crisp white text.
+ */
 #define SE_C_CLEAR    0x00   /* transparent (ML's own 0x00FC0000)       */
-#define SE_C_INK      0x01   /* #1E1A17  near-black, warm               */
-#define SE_C_SHADOW   0x02   /* #3D362F  deep warm grey                 */
-#define SE_C_SLATE    0x03   /* #5E554A  warm grey, dark                */
-#define SE_C_MID      0x04   /* #857A6B  warm grey                      */
-#define SE_C_EDGE     0x05   /* #ABA092  warm grey, light               */
-#define SE_C_PAPER    0x06   /* #E2D9C4  off-white -- the ground        */
-#define SE_C_HILITE   0x07   /* #F2EBDA  paper highlight                */
-#define SE_C_RUST     0x08   /* #8A3B22  deep rust                      */
-#define SE_C_RED      0x09   /* #C04A2E  brick red                      */
-#define SE_C_AMBER    0x0A   /* #DC8A32  amber                          */
-#define SE_C_GOLD     0x0B   /* #D9BE4A  mustard gold                   */
-#define SE_C_OLIVE    0x0C   /* #6B8A4E  olive green                    */
-#define SE_C_TEAL     0x0D   /* #357380  teal                           */
-#define SE_C_PLUM     0x0E   /* #8E5670  dusty plum                     */
+#define SE_C_INK      0x01   /* #0C0D0E  obsidian black (canvas ground) */
+#define SE_C_SHADOW   0x02   /* #1E2024  dark charcoal (selected row)   */
+#define SE_C_SLATE    0x03   /* #4E545E  dark grey / row dividers       */
+#define SE_C_MID      0x04   /* #88909A  medium grey (inactive labels)  */
+#define SE_C_EDGE     0x05   /* #2A2E35  subtle edge keylines           */
+#define SE_C_PAPER    0x06   /* #0C0D0E  compat alias for dark ground   */
+#define SE_C_HILITE   0x07   /* #F4F6F8  pure white text / active vals  */
+#define SE_C_RUST     0x08   /* #6B1610  dark red / inactive tab edge   */
+#define SE_C_RED      0x09   /* #D82C20  Canon Red (Shoot tab & cursor) */
+#define SE_C_AMBER    0x0A   /* #F67D00  Canon Orange (Setup/Settings)  */
+#define SE_C_GOLD     0x0B   /* #E0B820  mustard gold (Kodak speedband) */
+#define SE_C_OLIVE    0x0C   /* #38A040  Fuji emerald green             */
+#define SE_C_TEAL     0x0D   /* #1A86E0  Canon Blue (Play tab / Darkroom)*/
+#define SE_C_PLUM     0x0E   /* #C8D0D8  silver metal / badge highlights*/
 #define SE_C_WHITE    0x0F   /* FIXED at 0x03EB0000 -- see above        */
 
 /* The sixteen words themselves live next to the code that writes them,

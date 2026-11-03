@@ -60,6 +60,37 @@ static int se_battery_ok(void)
     return (lvl >= 2); /* Requires Full (3) or Medium (2); blocks Low (1) or Empty (0) */
 }
 
+/*
+ * Canon EOS 5D Classic (DIGIC II) Direct Print Blue LED Subsystem:
+ * Driven via GPIO registers at 0xC02200C0 and 0xC02200C4.
+ * In DIGIC II GPIO: 0x46 = high (output enabled), 0x44 = low (output enabled).
+ * NOTE: 0xC02200A0 is the Red CF card access LED and is intentionally untouched
+ * so Canon's native CF storage controller blinks normally during card I/O.
+ */
+#ifndef CAM_LED_BLUE
+#define CAM_LED_BLUE 0xC02200C0
+#endif
+
+static void se_blue_led_set(int state)
+{
+    uint32_t val = state ? 0x46 : 0x44;
+    *(volatile uint32_t *)0xC02200C0 = val;
+    *(volatile uint32_t *)0xC02200C4 = val;
+}
+
+static void se_blue_led_off(void)
+{
+    *(volatile uint32_t *)0xC02200C0 = 0x44;
+    *(volatile uint32_t *)0xC02200C4 = 0x44;
+}
+
+static void se_blue_led_blink(void)
+{
+    static int blink_state = 0;
+    blink_state = !blink_state;
+    se_blue_led_set(blink_state);
+}
+
 /* ===================================================================== */
 /* Preconditions, as checks rather than as comments                        */
 /* ===================================================================== */
@@ -215,6 +246,8 @@ int se_src_index   = SE_SOURCE_PREVIEW;
 #define SE_CFG_PATH  "A:/ML/SE.CFG"
 volatile int se_cfg_dirty;
 static int g_hf_mode_enabled = 1;
+static volatile int      g_playback_active = 0;
+static volatile uint32_t g_review_until_ticks = 0;
 static int g_settings_active = 0;          /* 1 when Settings Screen is visible */
 static int g_settings_cursor = 0;          /* Highlighted row index in Settings */
 static int g_grain_enabled   = 1;                 /* 1 = Film Stock Grain ON, 0 = Bypassed/Clean */
@@ -1470,22 +1503,22 @@ static int se_hold_develop(void)
  * layout did for two camera trips.
  */
 const uint32_t se_palette[16] = {
-    0x00FC0000u,   /* 0  CLEAR           transparent -- ML's own value    */
-    0x03170003u,   /* 1  INK    #1E1A17  near-black, warm                 */
-    0x0332FE06u,   /* 2  SHADOW #3D362F  deep warm grey                   */
-    0x034FFD08u,   /* 3  SLATE  #5E554A  warm grey, dark                  */
-    0x0371FD0Bu,   /* 4  MID    #857A6B  warm grey                        */
-    0x0394FF0Du,   /* 5  EDGE   #ABA092  warm grey, light                 */
-    0x03C7FE0Fu,   /* 6  PAPER  #E2D9C4  off-white -- the ground          */
-    0x03D8000Eu,   /* 7  HILITE #F2EBDA  paper highlight                  */
-    0x0348EE25u,   /* 8  RUST   #8A3B22  deep rust                        */
-    0x0361E836u,   /* 9  RED    #C04A2E  brick red                        */
-    0x038CD72Du,   /* A  AMBER  #DC8A32  amber                            */
-    0x03A9D51Bu,   /* B  GOLD   #D9BE4A  mustard gold                     */
-    0x036FF1FDu,   /* C  OLIVE  #6B8A4E  olive green                      */
-    0x035911EBu,   /* D  TEAL   #357380  teal                             */
-    0x0360071Au,   /* E  PLUM   #8E5670  dusty plum                       */
-    0x03EB0000u    /* F  WHITE           FIXED -- ML's marker, see below  */
+    0x00FC0000u,   /* 0  CLEAR                  transparent -- ML's own value    */
+    0x030D01FFu,   /* 1  INK / BG      #0C0D0E  obsidian black menu canvas       */
+    0x031F02FFu,   /* 2  SHADOW / PNL  #1E2024  charcoal selected row plate      */
+    0x035306FBu,   /* 3  SLATE         #4E545E  dark grey row divider rule       */
+    0x038E04FEu,   /* 4  MID           #88909A  medium grey inactive text        */
+    0x032D06FBu,   /* 5  EDGE          #2A2E35  subtle edge keylines             */
+    0x030D01FFu,   /* 6  PAPER / BG    #0C0D0E  obsidian black compat ground     */
+    0x03F50100u,   /* 7  HILITE        #F4F6F8  pure white text / active values  */
+    0x032FEF2Bu,   /* 8  RUST / DIMRED #6B1610  dark crimson inactive tab edge   */
+    0x035EDD57u,   /* 9  RED           #D82C20  Canon Red (Shoot tab & cursor)   */
+    0x0393AD47u,   /* A  AMBER         #F67D00  Canon Orange (Setup tab & cursor)*/
+    0x03B3AD20u,   /* B  GOLD          #E0B820  mustard gold speedband           */
+    0x0376E2D4u,   /* C  OLIVE         #38A040  Fuji emerald green               */
+    0x03703FC3u,   /* D  TEAL / BLUE   #1A86E0  Canon Blue (Play tab / Darkroom) */
+    0x03CF04FCu,   /* E  PLUM / SILVER #C8D0D8  silver metal badge accents       */
+    0x03EB0000u    /* F  WHITE                  FIXED -- ML's marker, see below  */
 };
 
 /*
@@ -1995,20 +2028,49 @@ static void se_screen_report(void)
 
 static void se_draw_review_crop_marks(void)
 {
-    if (!g_hf_mode_enabled || se_scr_want) return;
-    if (!MEM(CAM_gui_bmp_ready) || !MEM(CAM_display_is_on)) return;
+    /* Gate 1: Half-Frame mode must be active, and Soup UI must NOT be open */
+    if (!g_hf_mode_enabled || se_scr_want || se_scr_open) return;
+    if (se_shutting_down()) return;
 
+    /* Gate 2: Display must be powered on and Canon bitmap VRAM must be ready */
+    if (!MEM(CAM_display_is_on) || !MEM(CAM_gui_bmp_ready)) {
+        g_playback_active = 0;
+        return;
+    }
+
+    /* Gate 3: Must be in Playback (PLAY pressed) or Quick Review (photo just shot) */
+    uint32_t now = (uint32_t)CAM_CALL0(CAM_tickGet, long);
+    if (!g_playback_active && (now > g_review_until_ticks)) return;
+
+    /* Gate 4: VRAM buffer validation */
     uintptr_t p = (uintptr_t)MEM(CAM_bmp_vram_real_ptr);
     if (!cam_panel_ptr_ok(p)) return;
 
+    /* Acquire Canon Bitmap Display Device lock to prevent EDMAC bus collision */
+    CAM_CALL0(CAM_BmpDDev_take, void);
+
     volatile uint8_t *hw = (volatile uint8_t *)p;
     int row;
-    for (row = 20; row < 220; row++) {
+
+    /*
+     * 720x240 4bpp display buffer: 2 pixels per byte (360 bytes/row).
+     * 25% boundary: X = 180 (even pixel -> low nibble of byte 90)
+     * 75% boundary: X = 540 (even pixel -> low nibble of byte 270)
+     *
+     * In Canon native playback palette, SE_ML_WHITE (0x01) is pure white.
+     * Subtle dashed lines: 4px on, 2px off between rows 24 and 216.
+     * Atomic read-modify-write preserves adjacent odd pixels (X=181, X=541).
+     */
+    for (row = 24; row < 216; row++) {
         if ((row % 6) < 4) {
-            hw[row * ML_BMP_PITCH + 90]  = SE_C_MID;  /* 25% boundary */
-            hw[row * ML_BMP_PITCH + 270] = SE_C_MID;  /* 75% boundary */
+            uint32_t off_l = (uint32_t)row * ML_BMP_PITCH + 90;
+            uint32_t off_r = (uint32_t)row * ML_BMP_PITCH + 270;
+            hw[off_l] = (uint8_t)((hw[off_l] & 0xF0) | (SE_ML_WHITE & 0x0F));
+            hw[off_r] = (uint8_t)((hw[off_r] & 0xF0) | (SE_ML_WHITE & 0x0F));
         }
     }
+
+    CAM_CALL0(CAM_BmpDDev_give, void);
 }
 
 void se_screen(void)
@@ -2154,7 +2216,16 @@ void se_screen(void)
             se_scr_timing = 1;             /* the watcher reports the close */
         }
 
-        if (!se_scr_open) { idle = 0; cam_msleep(SE_SCR_IDLE_MS); continue; }
+        if (!se_scr_open) {
+            static int crop_tick = 0;
+            idle = 0;
+            if (++crop_tick >= 5) {
+                crop_tick = 0;
+                se_draw_review_crop_marks();
+            }
+            cam_msleep(SE_SCR_IDLE_MS);
+            continue;
+        }
         se_scr_at(SE_SCRP_OPEN);
 
         /*
@@ -2363,6 +2434,7 @@ static void on_progress(void *ctx, const char *stage, int pct)
 {
     se_stage = stage;
     se_pct   = pct;
+    se_blue_led_blink();
 
     /*
      * Nothing else. This used to write the log every ten percent, which
@@ -2442,6 +2514,7 @@ static const uint8_t __attribute__((unused)) GB_RGB[4][3] = {
 static int look_emit(void *ctx, const uint8_t *row, int width)
 {
     look_ctx *L = (look_ctx *)ctx;
+    if ((L->y_row & 0x1F) == 0) se_blue_led_blink();
 
     if (g_hf_mode_enabled) {
         if (se_src_index == SE_SOURCE_RAW) {
@@ -3319,18 +3392,23 @@ volatile int se_dev_from_raw, se_dev_from_preview;
 static se_err develop_one(const char *cr2_path, const char *out_path,
                           void *hdr)
 {
+    g_review_until_ticks = (uint32_t)CAM_CALL0(CAM_tickGet, long) + 350;
+    se_err rc;
+    se_blue_led_blink();
     if (se_src_index == SE_SOURCE_RAW) {
         se_dev_from_raw++;
         /* Option 2: Fast 2x2 Bayer Hardware Binning + Pre-Crop Engine (7.15 MP: 3276x2184) */
         se_note("[RAW 7.15 MP RESAMPLE] Rendering 7.15 MP Diptych (3276x2184) via Method 1 inline spatial expansion in ~15-20s");
         int orig_res = se_res_index;
         se_res_index = 1; /* High resolution 7.1 MP canvas target */
-        se_err rc = develop_preview(cr2_path, out_path, hdr);
+        rc = develop_preview(cr2_path, out_path, hdr);
         se_res_index = orig_res;
-        return rc;
+    } else {
+        se_dev_from_preview++;
+        rc = develop_preview(cr2_path, out_path, hdr);
     }
-    se_dev_from_preview++;
-    return develop_preview(cr2_path, out_path, hdr);
+    se_blue_led_off();
+    return rc;
 }
 
 /* ===================================================================== */
@@ -3625,6 +3703,7 @@ static int se_sweep_roll(void)
     int      t_start;
 
     g_roll_dev_requested = 0;
+    se_blue_led_blink();
     rctx.count = 0;
     rctx.paths = (char (*)[SE_PATH_MAX])cam_alloc((size_t)MAX_ROLL_CR2S * SE_PATH_MAX);
 
@@ -3638,6 +3717,7 @@ static int se_sweep_roll(void)
         str_copy(se_status, sizeof(se_status), "[BATTERY LOW: ABORTED]");
         cam_free(rctx.paths);
         se_ui_dirty = 1;
+        se_blue_led_off();
         return 0;
     }
 
@@ -3737,6 +3817,7 @@ static int se_sweep_roll(void)
     cam_free(hdr);
     cam_free(rctx.paths);
     se_busy = 0;
+    se_blue_led_off();
     se_pct  = 100;
     se_snprintf(se_status, sizeof(se_status), "[ROLL COMPLETE: %d %s]", total_units, g_hf_mode_enabled ? "HF DIPTYCHS" : "FF FRAMES");
     se_ui_dirty = 1;
@@ -4098,7 +4179,34 @@ int se_key(void *ev)
             se_note("[SOUP MENU] Opened via JUMP button");
             return 0; /* Consumed */
         }
+        /* Direct Print button (0x1E / 0x1D) */
+        if (param == 0x1E || param == 0x1D) {
+            if (g_hf_mode_enabled && g_hf_state == 1) {
+                /* Shot 1 is staged in memory: Direct Print acts as instant discard switch */
+                cam_remove("A:/ML/SHOT1.TMP");
+                g_hf_state = 0;
+                
+                se_ui_dirty = 1;
+                se_note("[HALF-FRAME] Shot 1 discarded via Direct Print button");
+                return 0; /* Consumed */
+            } else {
+                /* Direct invocation of Roll Development Lab modal */
+                se_count_roll_status(&g_roll_stat_cr2s, &g_roll_stat_diptychs, &g_roll_stat_existing, &g_roll_stat_new);
+                g_roll_confirm_pending = 1;
+                g_roll_mode_all = 0; /* Default: NEW only */
+                se_scr_want = 1;     /* Open Soup UI directly to Lab modal */
+                se_ui_dirty = 1;
+                
+                se_note("[ROLL DEV] Direct Print pressed -> Opening Roll Lab directly");
+                return 0; /* Consumed */
+            }
+        }
         /* PLAY (0x06) & TRASH (0x07) return 1 -> Native Canon playback & delete */
+        if (param == SE_BTN_PLAY) {
+            g_playback_active = !g_playback_active;
+        } else if (param == SE_BTN_MENU || param == SE_BTN_TRASH) {
+            g_playback_active = 0;
+        }
         return 1;
     }
 
@@ -4147,6 +4255,7 @@ int se_key(void *ev)
                 } else if (g_hf_state == 1) {
                     cam_remove("A:/ML/SHOT1.TMP");
                     g_hf_state = 0;
+                    
                 }
                 break;
             case SE_SET_SOURCE:
@@ -4188,8 +4297,11 @@ int se_key(void *ev)
         case SE_BTN_TRASH:
         case SE_BTN_MENU:
         case SE_BTN_PLAY:
+        case 0x1D:
+        case 0x1E:
             /* Cancel confirmation modal and return to clean stock browser */
             g_roll_confirm_pending = 0;
+            if (!(g_hf_mode_enabled && g_hf_state == 1)) 
             se_ui_dirty = 1;
             return 0;
 
@@ -4206,6 +4318,7 @@ int se_key(void *ev)
         /* Close Soup Menu */
         se_scr_want = 0;
         g_roll_confirm_pending = 0;
+        if (!(g_hf_mode_enabled && g_hf_state == 1)) 
         se_ui_dirty = 1;
         se_note("[SOUP MENU] Closed via button");
         return 0;
@@ -4225,6 +4338,7 @@ int se_key(void *ev)
             if (g_hf_state == 1) {
                 cam_remove("A:/ML/SHOT1.TMP");
                 g_hf_state = 0;
+                
             }
             se_note("[HALF-FRAME] Disabled via UI menu (Full Frame mode).");
         }
@@ -4242,6 +4356,7 @@ int se_key(void *ev)
         /* SET chooses the current stock and exits to shoot! */
         se_cfg_dirty = 1;
         se_scr_want = 0;
+        if (!(g_hf_mode_enabled && g_hf_state == 1)) 
         se_ui_dirty = 1;
         se_note("[SOUP MENU] Stock chosen: %s -> Returning to camera", se_stocks[se_stock_index].name);
         return 0;
@@ -4253,6 +4368,7 @@ int se_key(void *ev)
         se_count_roll_status(&g_roll_stat_cr2s, &g_roll_stat_diptychs, &g_roll_stat_existing, &g_roll_stat_new);
         g_roll_confirm_pending = 1;
         g_roll_mode_all = 0; /* Default: NEW only */
+        
         se_ui_dirty = 1;
         se_note("[ROLL DEV] Triggered via PLAY/PRINT -> Modal confirmation active");
         return 0;
