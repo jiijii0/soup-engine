@@ -1,0 +1,7 @@
+port-7d/build/
+*.o
+*.d
+*.su
+*.dSYM/
+.DS_Store
+__pycache__/
