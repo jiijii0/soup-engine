@@ -43,7 +43,7 @@ In Full-Frame Mode:
 ---
 ## 🕹️ In-Camera Navigation & Button Mapping
 
-![In-Camera Navigation Flow](Flow.png)
+![In-Camera Navigation Flow](doc/Flow.png)
 The Soup Engine interface is invoked from the camera shooting state and organized across three distinct operational screens:
 ```
 [ SHOOTING STATE ]
