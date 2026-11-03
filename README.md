@@ -157,7 +157,7 @@ The Soup Engine interface is invoked from the camera shooting state and organize
    
   Settings are stored in human-readable plain text on the CompactFlash card at `A:/ML/SE.CFG`. The file is read at camera startup and updated whenever parameters change in the UI:  
 ```  
-STOCK KODAK_PORTRA_400      
+STOCK VELVIA      
    FORMAT HF      
    SOURCE JPEG      
    SIZE HALF      
@@ -189,20 +189,9 @@ STOCK KODAK_PORTRA_400   
   **Step-by-Step Installation**  
 1. **Backup Existing Autoexec**:  
    
-    
-   
-     
-   
-    
-   
    Ensure you have a copy of your card working `AUTOEXEC.BIN` stored safely on your computer.  
-2. **Download or Compile v56**:  
+2. **Download or Compile**:  
    
-    
-   
-     
-   
-    
    
    Compile the payload using the build instructions below or copy the pre-built files:  
 - Copy `SE.BIN` to the card root (`A:/ML/SE.BIN` or `A:/SE.BIN`).  
@@ -210,13 +199,7 @@ STOCK KODAK_PORTRA_400   
 - Ensure stock look files exist in `A:/ML/FILM/*.fs` along with `A:/ML/FILM/INDEX.TXT`.  
 1. **Power On**:  
    
-    
-   
-     
-   
-    
-   
-   Insert the card and switch on the camera. Press **`JUMP`** to open the Film Magazine.  
+  Insert the card and switch on the camera. Press **`JUMP`** to open the Film Magazine.  
   
 ---  
 **Building from Source**  
@@ -236,7 +219,7 @@ STOCK KODAK_PORTRA_400   
 # Clone the repository and switch to the v56 sync branch      
    git clone https://github.com/<your-fork>/soup-engine.git      
    cd soup-engine/src      
-   git checkout half-frame      
+   git checkout half-frame-5d      
          
    # Clean previous build artifacts      
    make clean      
@@ -248,7 +231,7 @@ STOCK KODAK_PORTRA_400   
    
 ```  
 Upon a successful build, the toolchain outputs:  
-- `src/ml/build/AUTOEXEC.BIN` (221,184 bytes, ML loader trampoline).  
+- `src/ml/build/AUTOEXEC.BIN` (ML loader trampoline).  
 - `src/ml/build/SE.BIN`  (Soup Engine core payload).  
   
 ---  
