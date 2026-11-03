@@ -74,7 +74,7 @@ The Soup Engine interface is invoked from the camera shooting state and organize
 
 ### 1. Main Film Magazine (`SE_SCREEN_STOCK`)
 
-![Main Film Magazine Screen](Screenshot_3.png)
+![Main Film Magazine Screen](doc/Screenshot_3.png)
 - **`JUMP`**: Opens the Soup Engine magazine overlay.
 - **Quick Control Dial (or `WHEEL_UP` / `WHEEL_DOWN`)**: Seamlessly rotates through available `.fs` film stocks.
 - **`SET`**: Locks in the highlighted stock, flushes choice to `A:/ML/SE.CFG`, and immediately dismisses the overlay so you can shoot.
@@ -86,7 +86,7 @@ The Soup Engine interface is invoked from the camera shooting state and organize
 
 ### 2. Configuration Settings Menu (`SE_SCREEN_SETTINGS`)
 
-![Configuration Settings Menu](Screenshot_2.png)
+![Configuration Settings Menu](doc/Screenshot_2.png)
 
 Accessible by pressing **`INFO`** while the magazine is open:
 - **Row 0: `FORMAT`** -> Toggle between `HALF-FRAME (3:4 DIPTYCH)` and `FULL-FRAME (3:2)`.
@@ -98,7 +98,7 @@ Accessible by pressing **`INFO`** while the magazine is open:
 
 ### 3. Roll Development Lab (`g_roll_confirm_pending`)
 
-![Roll Development Lab Modal](Screenshot_1.png)
+![Roll Development Lab Modal](doc/Screenshot_1.png)
 
 Accessible by pressing **`PLAY`** while on the Film Magazine:
 - Displays an on-screen darkroom slate detailing pending shots: e.g. `DEV 12 NEW DIPTYCHS (4 ALREADY DONE)`.
