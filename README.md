@@ -55,10 +55,9 @@ All thirteen, one frame, straight off the card.
 > [@rebelt2i](https://github.com/rebelt2i) lives on its own branch,
 > [`50d`](https://github.com/jiijii0/soup-engine/tree/50d).
 
-> 📷 **Canon EOS 7D.** A community port by
-> [@thebakers-club](https://github.com/thebakers-club),
-> [Souper7D](https://github.com/thebakers-club/souper7d), runs the
-> engine inside an original 7D.
+> 📷 **Canon EOS 7D.** [Souper7D](https://github.com/thebakers-club/souper7d),
+> a community port by [@thebakers-club](https://github.com/thebakers-club),
+> runs the engine on an original 7D.
 
 > 💻 **Mac.** [SoupDesk](https://github.com/thebakers-club/SoupDesk),
 > also by [@thebakers-club](https://github.com/thebakers-club), puts the
