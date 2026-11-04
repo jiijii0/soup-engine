@@ -88,10 +88,10 @@ uninstall.
 
 ### 3️⃣ &nbsp; Copy the files to the root of your card
 
-> ### 📦 [Download the latest release](https://github.com/jiijii0/soup-engine/releases/tag/v0.1.0-beta)
+> ### 📦 [Download Canon-EOS-5D.zip](https://github.com/jiijii0/soup-engine/releases/download/folders/Canon-EOS-5D.zip)
 
-Unzip to the card root, replacing `AUTOEXEC.BIN`. Or copy
-[`card/`](card) from this repo, which is the same files.
+Unzip it, then copy everything inside its [`card/`](card) folder to the
+root of your card, replacing `AUTOEXEC.BIN`.
 
 | file | what it is |
 |:--|:--|

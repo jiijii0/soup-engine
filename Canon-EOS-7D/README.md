@@ -40,7 +40,8 @@ new in this port and still being tuned.
 
 ## Install
 
-1. Download the release zip and copy its `ML` folder onto the card, merging
+1. [Download Canon-EOS-7D.zip](https://github.com/jiijii0/soup-engine/releases/download/folders/Canon-EOS-7D.zip), unzip it, and copy the
+   `ML` folder from inside its [`card/`](card) folder onto the card, merging
    with the `ML` folder already there. It adds `ML/modules/soup7d.mo` and
    `ML/FILM/` (the 27 stocks and `INDEX.TXT`). Nothing else on the card changes.
 2. In the camera, open the ML menu → **Modules**, enable **soup7d**, restart.

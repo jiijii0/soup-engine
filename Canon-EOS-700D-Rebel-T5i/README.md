@@ -64,12 +64,11 @@ clock and the lens are the simulator's, and the pictures come from
    camera starts and their menu opens. The module is built against their
    2025-06-20 build (`ed3e7c0df`). A much newer or older build may refuse to
    load it.
-2. Download the zip from the
-   [latest 700D release](https://github.com/GitariDev/soup-engine/releases/latest)
-   on GitariDev's fork,
-   or build it with `make card-700d` (see [`src/README.md`](src/README.md)).
-3. Unzip it to the root of the card, merging into the `ML` folder that is
-   already there.
+2. [Download Canon-EOS-700D-Rebel-T5i.zip](https://github.com/jiijii0/soup-engine/releases/download/folders/Canon-EOS-700D-Rebel-T5i.zip)
+   and unzip it. The files for the card are in its [`card/`](card) folder.
+   Or build them with `make card-700d` (see [`src/README.md`](src/README.md)).
+3. Copy the `ML` folder from `card/` to the root of the card, merging into
+   the `ML` folder that is already there.
 4. Eject the card properly and switch the camera on.
 
 | file | what it is |

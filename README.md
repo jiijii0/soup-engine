@@ -57,15 +57,14 @@ for that body.
 
 | | camera | firmware | how it runs | download | by |
 |:--|:--|:--|:--|:--|:--|
-| 📷 | **[Canon EOS 5D Classic](Canon-EOS-5D)** | 1.1.1 | patched Magic Lantern loader + `SE.BIN` | [release](https://github.com/jiijii0/soup-engine/releases/tag/v0.1.0-beta) | [@jiijii0](https://github.com/jiijii0) |
-| 🎞️ | **[Canon EOS 5D Classic, Half Frame](Canon-EOS-5D-Half-Frame)** | 1.1.1 | as above, plus half-frame diptychs and roll developing | build from source | [@mmarco25](https://github.com/mmarco25) |
-| 📷 | **[Canon EOS 7D](Canon-EOS-7D)** (original, not Mark II) | 2.0.3 | Magic Lantern module, `soup7d.mo` | [releases](https://github.com/thebakers-club/souper7d/releases/latest) | [@thebakers-club](https://github.com/thebakers-club) |
-| 📷 | **[Canon EOS 50D](Canon-EOS-50D)** | 1.0.9 | Magic Lantern rebuilt with a Film page | [releases](https://github.com/rebelt2i/soup-engine/releases/latest) (the `-50D.109` zip) | [@rebelt2i](https://github.com/rebelt2i) |
-| 📷 | **[Canon EOS 700D / Rebel T5i / Kiss X7i](Canon-EOS-700D-Rebel-T5i)** | 1.1.5 | Magic Lantern module, `soupeng.mo` | [releases](https://github.com/GitariDev/soup-engine/releases/latest) | [@GitariDev](https://github.com/GitariDev) |
+| 📷 | **[Canon EOS 5D Classic](Canon-EOS-5D)** | 1.1.1 | patched Magic Lantern loader + `SE.BIN` | 📦 [Canon-EOS-5D.zip](https://github.com/jiijii0/soup-engine/releases/download/folders/Canon-EOS-5D.zip) | [@jiijii0](https://github.com/jiijii0) |
+| 🎞️ | **[Canon EOS 5D Classic, Half Frame](Canon-EOS-5D-Half-Frame)** | 1.1.1 | as above, plus half-frame diptychs and roll developing | 📦 [Canon-EOS-5D-Half-Frame.zip](https://github.com/jiijii0/soup-engine/releases/download/folders/Canon-EOS-5D-Half-Frame.zip) | [@mmarco25](https://github.com/mmarco25) |
+| 📷 | **[Canon EOS 7D](Canon-EOS-7D)** (original, not Mark II) | 2.0.3 | Magic Lantern module, `soup7d.mo` | 📦 [Canon-EOS-7D.zip](https://github.com/jiijii0/soup-engine/releases/download/folders/Canon-EOS-7D.zip) | [@thebakers-club](https://github.com/thebakers-club) |
+| 📷 | **[Canon EOS 50D](Canon-EOS-50D)** | 1.0.9 | Magic Lantern rebuilt with a Film page | 📦 [Canon-EOS-50D.zip](https://github.com/jiijii0/soup-engine/releases/download/folders/Canon-EOS-50D.zip) | [@rebelt2i](https://github.com/rebelt2i) |
+| 📷 | **[Canon EOS 700D / Rebel T5i / Kiss X7i](Canon-EOS-700D-Rebel-T5i)** | 1.1.5 | Magic Lantern module, `soupeng.mo` | 📦 [Canon-EOS-700D-Rebel-T5i.zip](https://github.com/jiijii0/soup-engine/releases/download/folders/Canon-EOS-700D-Rebel-T5i.zip) | [@GitariDev](https://github.com/GitariDev) |
 
-Each port's downloads come from the person who ported it, since they
-build and test them on their camera. Only the 5D Classic release is
-published from this repo.
+Each download is that camera's whole folder. Unzip it and follow the
+`README.md` inside: it says which files go on the card.
 
 <br>
 
@@ -154,9 +153,9 @@ source, the card files if there are any, and a `README.md` covering
 what you need, how to install, how to use it, and how to remove it.
 Then add a row to the table above and open a pull request.
 
-If a camera's release is ever published from this repo, its tag starts
-with the camera, for example `5d-v0.2.0` or `7d-v0.1.0`, so every
-camera keeps its own line of releases.
+The download links above are made automatically from each folder
+whenever it changes, so a new folder gets its own zip with nothing
+else to set up.
 
 Please keep changes inside your folder, so every camera's build stays
 exactly as its author tested it.

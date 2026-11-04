@@ -166,7 +166,7 @@ STOCK VELVIA
 1. **Backup Existing Autoexec**:
 
 Ensure you have a copy of your card working `AUTOEXEC.BIN` stored safely on your computer.
-2. **Download or Compile**:
+2. **Download and Compile**: [Download Canon-EOS-5D-Half-Frame.zip](https://github.com/jiijii0/soup-engine/releases/download/folders/Canon-EOS-5D-Half-Frame.zip)
 
 Build `SE.BIN` with the instructions below (it is not shipped prebuilt yet), then copy it along with the files in `card/`:
 - Copy `SE.BIN` to the card root (`A:/ML/SE.BIN` or `A:/SE.BIN`).

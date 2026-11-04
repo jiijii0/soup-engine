@@ -57,13 +57,12 @@ Follow their instructions, then check the camera starts and their menu
 opens before going further. Back up their `autoexec.bin`, because
 putting it back is how you uninstall.
 
-### 2️⃣ &nbsp; Download or build it
+### 2️⃣ &nbsp; Download and build it
 
-> ### 📦 [rebelt2i's releases](https://github.com/rebelt2i/soup-engine/releases/latest)
->
-> Take the zip ending in `-50D.109.zip` and follow its `INSTALL.txt`.
+> ### 📦 [Download Canon-EOS-50D.zip](https://github.com/jiijii0/soup-engine/releases/download/folders/Canon-EOS-50D.zip)
 
-Or build it yourself.
+There are no prebuilt files for the 50D yet, so you build them from the
+folder.
 
 You need `arm-none-eabi-gcc` and Python 3. From this folder:
 

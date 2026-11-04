@@ -1,0 +1,18 @@
+# EXPERIMENTAL. Kodachrome 64: warm, dense, saturated reds and yellows,
+# deep contrasty shadows, blues leaning cyan. A slide film, so no lift.
+VERSION   3
+NAME      KODACHROME 64
+DESC      EXPERIMENTAL - WARM REDS, DENSE SHADOWS
+WB        AS_SHOT
+CURVE     0,0 48,28 128,130 208,222 255,250
+CURVE_R   0,0 64,70 128,138 192,204 255,252
+CURVE_G   0,0 128,128 255,248
+CURVE_B   0,0 64,56 128,118 192,184 255,236
+SAT       116
+HUE_SAT   126,120,96,104,104,100
+HUE_ROT   4,-2,-6,0,-6,0
+HUE_LUM   96,104,94,100,92,98
+SPLIT_SH  4,0,-4
+SPLIT_HI  10,6,-6
+GRAIN     12
+GRAIN_SIZE 18

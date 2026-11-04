@@ -1,0 +1,50 @@
+# Zips every camera folder (Canon-*) and attaches the zips to the
+# "folders" release, so each camera has a fixed download link:
+#
+#   https://github.com/jiijii0/soup-engine/releases/download/folders/Canon-EOS-5D.zip
+#
+# Runs on every push to master that touches a camera folder, and by hand
+# from the Actions tab.
+
+name: Camera folder downloads
+
+on:
+  push:
+    branches: [master]
+    paths: ["Canon-*/**", ".github/workflows/camera-folders.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: camera-folders
+  cancel-in-progress: false
+
+jobs:
+  zip:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Zip each camera folder
+        run: |
+          mkdir -p dist
+          for dir in Canon-*/; do
+            name="${dir%/}"
+            git archive --format=zip --prefix="$name/" -o "dist/$name.zip" HEAD "$name"
+            echo "$name.zip: $(du -h "dist/$name.zip" | cut -f1)"
+          done
+
+      - name: Upload to the "folders" release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! gh release view folders >/dev/null 2>&1; then
+            gh release create folders --title "Camera folders" --latest=false \
+              --notes "Each zip is one camera's folder from this repo, updated automatically on every change. Download the one for your camera and follow the README inside it. The list of cameras is in the [README](https://github.com/${GITHUB_REPOSITORY}#-pick-your-camera)."
+          fi
+          # Move the tag to this commit so the release's source matches the zips.
+          git tag -f folders
+          git push -f origin refs/tags/folders
+          gh release upload folders dist/*.zip --clobber
