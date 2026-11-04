@@ -88,7 +88,7 @@ uninstall.
 
 ### 3️⃣ &nbsp; Copy the files to the root of your card
 
-> ### 📦 [Download the latest release](https://github.com/jiijii0/soup-engine/releases/latest)
+> ### 📦 [Download the latest release](https://github.com/jiijii0/soup-engine/releases/tag/v0.1.0-beta)
 
 Unzip to the card root, replacing `AUTOEXEC.BIN`. Or copy
 [`card/`](card) from this repo, which is the same files.

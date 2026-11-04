@@ -57,7 +57,13 @@ Follow their instructions, then check the camera starts and their menu
 opens before going further. Back up their `autoexec.bin`, because
 putting it back is how you uninstall.
 
-### 2️⃣ &nbsp; Build it
+### 2️⃣ &nbsp; Download or build it
+
+> ### 📦 [rebelt2i's releases](https://github.com/rebelt2i/soup-engine/releases/latest)
+>
+> Take the zip ending in `-50D.109.zip` and follow its `INSTALL.txt`.
+
+Or build it yourself.
 
 You need `arm-none-eabi-gcc` and Python 3. From this folder:
 
