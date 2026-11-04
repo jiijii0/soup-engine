@@ -32,7 +32,7 @@ jobs:
           mkdir -p dist
           for dir in Canon-*/; do
             name="${dir%/}"
-            git archive --format=zip --prefix="$name/" -o "dist/$name.zip" HEAD "$name"
+            git archive --format=zip --prefix="$name/" -o "dist/$name.zip" "HEAD:$name"
             echo "$name.zip: $(du -h "dist/$name.zip" | cut -f1)"
           done
 
