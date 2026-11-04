@@ -58,13 +58,13 @@ instructions, and the download for that camera.
 
 <br>
 
-| | camera | firmware | how it runs | by |
-|:--|:--|:--|:--|:--|
-| 📷 | **[Canon EOS 5D Classic](Canon-EOS-5D)** | 1.1.1 | patched Magic Lantern loader + `SE.BIN` | [@jiijii0](https://github.com/jiijii0) |
-| 🎞️ | **[Canon EOS 5D Classic, Half Frame](Canon-EOS-5D-Half-Frame)** | 1.1.1 | as above, plus half-frame diptychs and roll developing | [@mmarco25](https://github.com/mmarco25) |
-| 📷 | **[Canon EOS 7D](Canon-EOS-7D)** (original, not Mark II) | 2.0.3 | Magic Lantern module, `soup7d.mo` | [@thebakers-club](https://github.com/thebakers-club) |
-| 📷 | **[Canon EOS 50D](Canon-EOS-50D)** | 1.0.9 | Magic Lantern rebuilt with a Film page | [@rebelt2i](https://github.com/rebelt2i) |
-| 📷 | **[Canon EOS 700D / Rebel T5i / Kiss X7i](Canon-EOS-700D-Rebel-T5i)** | 1.1.5 | Magic Lantern module, `soupeng.mo` | [@GitariDev](https://github.com/GitariDev) |
+| | camera | firmware | by |
+|:--|:--|:--|:--|
+| 📷 | **[Canon EOS 5D Classic](Canon-EOS-5D)** | 1.1.1 | [@jiijii0](https://github.com/jiijii0) |
+| 🎞️ | **[Canon EOS 5D Classic, Half Frame](Canon-EOS-5D-Half-Frame)** | 1.1.1 | [@mmarco25](https://github.com/mmarco25) |
+| 📷 | **[Canon EOS 7D](Canon-EOS-7D)** (original, not Mark II) | 2.0.3 | [@thebakers-club](https://github.com/thebakers-club) |
+| 📷 | **[Canon EOS 50D](Canon-EOS-50D)** | 1.0.9 | [@rebelt2i](https://github.com/rebelt2i) |
+| 📷 | **[Canon EOS 700D / Rebel T5i / Kiss X7i](Canon-EOS-700D-Rebel-T5i)** | 1.1.5 | [@GitariDev](https://github.com/GitariDev) |
 
 <br>
 
