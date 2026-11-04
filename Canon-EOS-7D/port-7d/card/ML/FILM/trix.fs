@@ -1,0 +1,15 @@
+# EXPERIMENTAL. Kodak Tri-X 400: punchy black and white. Deep blacks,
+# bright highlights, gritty grain, a little red sensitivity in the mix.
+VERSION   3
+NAME      TRI-X 400
+DESC      EXPERIMENTAL - MONO, PUNCHY, GRITTY
+WB        DAYLIGHT
+CURVE     0,0 48,26 128,136 208,226 255,252
+CURVE_R   0,0 64,72 128,142 192,208 255,255
+CURVE_G   0,0 128,128 255,252
+CURVE_B   0,0 64,56 128,116 192,182 255,240
+SAT       0
+HALATION  20 238 10
+HAL_TINT  255,255,255
+GRAIN     46
+GRAIN_SIZE 44
