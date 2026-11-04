@@ -1,0 +1,11 @@
+vendor/
+rom/
+src/out/
+src/ml/payload/*.o
+src/ml/payload/*.d
+src/ml/payload/*.elf
+src/ml/payload/mlstub.bin
+src/ml/payload/mlstub-loader.bin
+src/ml/payload/mlstub-hook.bin
+src/ml/payload/soupeng.bin
+src/ml/build/
