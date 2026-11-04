@@ -1,61 +1,39 @@
 <div align="center">
 
-# 🎞️ Soup Engine <sub><sup>beta</sup></sub>
+# 🎞️ Soup Engine for the Canon EOS 50D <sub><sup>beta</sup></sub>
 
-### Film looks, in the camera, on a Canon EOS 5D Classic or EOS 50D.
+### Film looks, in the camera, on a Canon EOS 50D.
 
-<br>
+`beta` &nbsp;·&nbsp; `GPL v2` &nbsp;·&nbsp; `13 film stocks` &nbsp;·&nbsp; `EOS 50D` &nbsp;·&nbsp; `firmware 1.0.9`
 
-<img src="doc/camera.gif" alt="scrolling the film stocks on the camera" width="620">
-
-<br>
-<br>
-
-`beta` &nbsp;·&nbsp; `GPL v2` &nbsp;·&nbsp; `13 film stocks` &nbsp;·&nbsp; `EOS 5D Classic` &nbsp;·&nbsp; `EOS 50D`
+A community port by [@rebelt2i](https://github.com/rebelt2i).
+<br>[← All cameras](../README.md#-pick-your-camera)
 
 </div>
 
 <br>
 
-The same look engine runs on both bodies. How you pick the stock, and
-what lands on the card, differs by camera — see **Using it** below for
-each.
-
-On the **5D Classic**, press the **trash button**, pick a film, shoot.
-On the **50D**, open the Magic Lantern **Film** page and turn **Film**
-on.
+Turn **Film** on in Magic Lantern's menu and pick a stock. Every photo
+you take after that gets a second JPEG beside the raw, with the look
+already on it.
 
 ```
-# 5D Classic
 IMG_1234.CR2        your raw file, untouched
-IMG_1234.FLM.JPG    the same photo with the look on it
-
-# 50D
-IMG_1234.CR2        your raw file (preview updated when Delete CR2 is off)
-FLM_1234.JPG        the same photo with the look on it, 2352×1568
+FLM_1234.JPG        the same photo with the look on it
 ```
-
-<br>
 
 ![all thirteen film looks on one frame](doc/stocks.jpg)
 
-<div align="center"><sub>
-All thirteen, one frame, straight off the card.
-</sub></div>
-
-<br>
-
-> ⚠️ **Beta.** Unofficial code on twenty year old cameras. It's easy to
-> remove. Supported firmware is **5D Classic 1.1.1** and **50D 1.0.9**;
-> other bodies are out of scope.
+> ⚠️ **Beta.** Unofficial code on your camera. Raws are never modified
+> unless you turn on **Delete CR2** yourself.
 
 > ⚖️ **No warranty.** Like all GPL software this comes with none. You
 > install it at your own risk. See sections 11 and 12 of the
 > [licence](LICENSE).
 
-> 🎨 **The looks are still being tweaked** and will keep changing. The
-> names are shorthand for the films they're based on, not exact copies.
-> All trademarks belong to their owners.
+> 🎨 **The looks are still being tweaked.** The names are shorthand for
+> the films they're based on, not exact copies. All trademarks belong
+> to their owners.
 
 <br>
 
@@ -65,107 +43,49 @@ All thirteen, one frame, straight off the card.
 
 ## 📦 Installing
 
-Pick your body. The steps are not interchangeable: the Classic boots
-`SE.BIN` through a patched Magic Lantern; the 50D boots a Magic Lantern
-rebuild with the Film page linked in.
+You need a **Canon EOS 50D on firmware 1.0.9** and a CompactFlash card.
 
-<br>
+On the 50D, Soup Engine is built into Magic Lantern itself. There is no
+`SE.BIN`. You build a Magic Lantern `autoexec.bin` that has the Film
+page in it.
 
-### EOS 5D Classic (firmware 1.1.1)
-
-#### 1️⃣ &nbsp; Install Magic Lantern
-
-> ### 👉 [builds.magiclantern.fm/5DC.html](https://builds.magiclantern.fm/5DC.html)
-
-Follow their instructions, then check the camera starts and their menu
-opens before going further. Soup Engine never touches your camera's
-boot flag; their installer does that.
-
-<br>
-
-#### 2️⃣ &nbsp; Back up their `autoexec.bin`
-
-Copy it off the card somewhere safe. Putting it back is how you
-uninstall.
-
-<br>
-
-#### 3️⃣ &nbsp; Copy the files to the root of your card
-
-> ### 📦 [Download the latest release](https://github.com/jiijii0/soup-engine/releases/latest)
-
-Unzip to the card root, replacing `AUTOEXEC.BIN`. Or copy
-[`card/`](card) from this repo, which is the same files.
-
-| file | what it is |
-|:--|:--|
-| 📄 `AUTOEXEC.BIN` | replaces Magic Lantern's |
-| ⚙️ `SE.BIN` | the engine |
-| 🎞️ `ML/FILM/` | the film stocks |
-
-<br>
-
-#### ✅ &nbsp; Put the card in and switch the camera on
-
-That's it. Nothing to enable, no menu to find.
-
-> While Soup Engine is installed you won't have Magic Lantern's own
-> menu, since this replaces the file that provides it. Put their
-> `autoexec.bin` back whenever you want it again.
-
-<br>
-
-### EOS 50D (firmware 1.0.9)
-
-Magic Lantern's build for that firmware is the one this was made
-against: `magiclantern.2025-06-20.50D.109`.
-
-<br>
-
-#### 1️⃣ &nbsp; Install Magic Lantern
+### 1️⃣ &nbsp; Install Magic Lantern
 
 > ### 👉 [builds.magiclantern.fm/50D.html](https://builds.magiclantern.fm/50D.html)
 
 Follow their instructions, then check the camera starts and their menu
-opens before going further.
+opens before going further. Back up their `autoexec.bin`, because
+putting it back is how you uninstall.
 
-<br>
+### 2️⃣ &nbsp; Build it
 
-#### 2️⃣ &nbsp; Back up their `autoexec.bin`
-
-Copy it off the card somewhere safe. Putting it back (with a matching
-`ML/modules/50D_109.sym`) is how you uninstall.
-
-<br>
-
-#### 3️⃣ &nbsp; Build their `AUTOEXEC.BIN` with the Film page
-
-The 50D does not boot `SE.BIN`, and `tools/patch-film.py` must not be
-run on it. The body boots Magic Lantern plus a small overlay in this
-repo. Why the Classic patch path fails here is in
-[`src/ml/platforms/50D.109/PITFALLS.md`](src/ml/platforms/50D.109/PITFALLS.md).
+You need `arm-none-eabi-gcc` and Python 3. From this folder:
 
 ```sh
-python3 src/tools/build-50d.py --card /path/to/card
+cd src
+python3 tools/build-50d.py                      # build only
+python3 tools/build-50d.py --card /path/to/card  # build and copy to the card
 ```
 
-That checks out Magic Lantern `ed3e7c0d` (the 2025-06-20 50D.109
-build), copies [`integrations/magiclantern/50D.109/`](integrations/magiclantern/50D.109/)
-over it, and writes three things to the card:
+The script checks out Magic Lantern at a pinned commit (`ed3e7c0d`,
+their 2025-06-20 50D build), adds the Film page from
+[`integrations/magiclantern/50D.109/`](integrations/magiclantern/50D.109),
+and builds it. Nothing of Magic Lantern's is committed here.
 
-| file | what it is |
+### 3️⃣ &nbsp; Put it on the card
+
+`--card` does this for you. By hand, the two built files are in
+`src/vendor/magiclantern/platform/50D.109/build/`:
+
+| file | where it goes on the card |
 |:--|:--|
-| 📄 `AUTOEXEC.BIN` | Magic Lantern, with the Film page linked in |
-| 📄 `ML/modules/50D_109.sym` | must match that `AUTOEXEC.BIN` |
-| 🎞️ `ML/FILM/` | the film stocks |
+| 📄 `autoexec.bin` | `AUTOEXEC.BIN`, replacing Magic Lantern's |
+| 🧭 `50D_109.sym` | `ML/modules/50D_109.sym`, **always together with the `AUTOEXEC.BIN` above** |
+| 🎞️ `src/stocks/*.fs` and `INDEX.TXT` | `ML/FILM/` |
 
-<br>
-
-#### ✅ &nbsp; Put the card in and switch the camera on
-
-Open the Magic Lantern menu. The **Film** page is the one with the `F`
-tab. Turn **Film** on. Leave **Delete CR2** off until you have seen a
-picture you like.
+The build details, and the pitfalls found along the way, are in
+[`src/README.md`](src/README.md) and
+[`src/ml/platforms/50D.109/PITFALLS.md`](src/ml/platforms/50D.109/PITFALLS.md).
 
 <br>
 
@@ -175,142 +95,22 @@ picture you like.
 
 ## 📷 Using it
 
-<br>
+Open Magic Lantern's menu and go to the **Film** tab.
 
-### EOS 5D Classic
-
-Press the **trash button** and the picker fills the screen.
-
-| button | what it does |
+| setting | what it does |
 |:--|:--|
-| 🎛️ **Wheel** | choose a film |
-| ↕️ **Up / Down** | choose where the look comes from |
-| ✅ **`SET`** | pick that film and close |
-| 🗑️ **Trash** | close, changing nothing |
+| **Film** | `ON` develops every new raw. `OFF` leaves every file alone. |
+| **Delete CR2** | after `FLM_nnnn.JPG` is written, removes the raw. Off by default. |
+| **Stock** | the look to develop with, from `ML/FILM` |
 
-Your choice survives switching the camera off.
-
-Each photo takes about twenty seconds to develop. You can keep shooting
-while it works, and the screen shows `FRAME 2 OF 3` when there's a
-queue.
-
-<br>
-
-> ### ⚠️ Set your Picture Style to Standard, Neutral or Faithful
->
-> On Monochrome every look comes out black and white.
-
-<br>
-
-**`SOURCE: JPEG`** is the default. Use this.
-
-**`SOURCE: RAW`** works from the sensor data instead. It takes minutes
-rather than seconds, some colour adjustments can't be applied, and
-`ACROS` won't be black and white.
-
-`FILM SPEED 50` on the picker is only a label. It does not change your
-camera's ISO.
-
-Your raw files are never modified. Delete the JPEG and the photo is
-exactly as the camera shot it.
-
-<br>
-
-### EOS 50D
-
-On the **Film** page:
-
-| row | what it does |
-|:--|:--|
-| **Film** | off leaves every file alone. On develops each new raw. |
-| **Delete CR2** | off keeps the raw. On deletes it only after `FLM_nnnn.JPG` exists. |
-| **Stock** | the look. The wheel changes it. |
-
-The choice is written to `ML/SE.CFG` and survives switching the camera off.
-
-Take a photo. The screen shows `FILM ACROS 43,71%` until the JPEG is
-finished. That is often half a minute on this body, and you can keep
-shooting while it works. When the box goes away, open playback on that
-shot: with **Delete CR2** off, the raw's preview is already the look.
-`FLM_1234.JPG` is the same picture as its own file, and the camera
-lists it after the next power-on.
-
-<br>
-
-> ### ⚠️ Set your Picture Style to Standard, Neutral or Faithful
->
-> On Monochrome every look comes out black and white, because the camera
-> hands this a grey picture to start from and there's no colour in it
-> to work with.
-
-<br>
-
-The look is applied to the JPEG preview Canon already embedded in the
-raw, not to the sensor data. That is why a monochrome picture style
-comes out black and white: the preview arrives with no colour left.
-
-<br>
-
----
-
-<br>
-
-## 🎞️ The films
-
-Thirteen, still under development.
-
-They're small text files in `ML/FILM` on the card, so you can read them,
-change them, or write your own. The camera lists whatever it finds
-there.
-
-<br>
-
-<div align="center">
-
-### 🎨 [Soup Stocks](https://jiijii0.github.io/soup-stocks/)
-
-**A web editor for the film stocks.**
-
-Drop in a photo, move sliders, download a `.fs`, put it on the card.
-
-The preview is this engine's own code compiled to WebAssembly, so it
-matches what the camera writes.<br>Your photo never leaves your browser.
-
-</div>
-
-<br>
-
----
+Your choices are saved to `ML/SE.CFG` and survive switching the camera
+off.
 
 <br>
 
 ## 🧹 Removing it
 
-<br>
-
-### EOS 5D Classic
-
-Put Magic Lantern's original `autoexec.bin` back. That's all.
-
-To pause it without uninstalling, delete `SE.BIN`. The camera boots
-normally without it.
-
-> 🆘 **If the camera ever misbehaves:** pull the battery, put the card
-> in a computer, delete `SE.BIN`. Don't delete `AUTOEXEC.BIN` while the
-> boot flag is on, because with the flag set and no `AUTOEXEC.BIN` the
-> camera won't start at all.
-
-<br>
-
-### EOS 50D
-
-Put Magic Lantern's original `autoexec.bin` back, and put a matching
-`ML/modules/50D_109.sym` beside it. The 50D does not boot `SE.BIN`;
-deleting that file does not uninstall the Film page.
-
-> 🆘 **If the camera ever misbehaves:** pull the battery, put the card
-> in a computer, restore stock Magic Lantern's `AUTOEXEC.BIN` and
-> `50D_109.sym`. Don't delete `AUTOEXEC.BIN` while the boot flag is on.
+Put Magic Lantern's original `autoexec.bin` back on the card. That's all.
 
 <br>
 
@@ -320,29 +120,14 @@ deleting that file does not uninstall the Film page.
 
 ## ❤️ Thanks
 
-This wouldn't exist without [Magic Lantern](https://magiclantern.fm).
+Ported by [@rebelt2i](https://github.com/rebelt2i). The engine and the
+film stocks are [Soup Engine](../README.md) by
+[@jiijii0](https://github.com/jiijii0).
 
-Soup Engine runs inside their work. Their builds for the 5D Classic and
-the 50D are what let the cameras run any of this, and years of their
-reverse engineering made it possible to understand. They're worth
-supporting.
+This runs inside [Magic Lantern](https://magiclantern.fm). Soup Engine
+isn't their project, so please don't take problems with it to them.
+Open an issue on this repo instead, and say it's the 50D.
 
-Soup Engine isn't their project, so please don't take problems with it
-to them. Open an issue here instead.
+## 📄 Licence
 
-<br>
-
-## 📄 Source and licence
-
-All of it is in [`src/`](src).
-
-On the **5D Classic**, `AUTOEXEC.BIN` is Magic Lantern's program with
-215 bytes changed, and `tools/patch-film.py` is what applies them.
-
-On the **50D**, `AUTOEXEC.BIN` is a rebuilt Magic Lantern with the Film
-page from [`integrations/magiclantern/50D.109/`](integrations/magiclantern/50D.109/),
-built by `tools/build-50d.py`.
-
-GPL v2. See [LICENSE](LICENSE). Distributed **without any warranty**,
-including the implied warranties of merchantability and fitness for a
-particular purpose (sections 11 and 12).
+GPL v2. See [LICENSE](LICENSE).

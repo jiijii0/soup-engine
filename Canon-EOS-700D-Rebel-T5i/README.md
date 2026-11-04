@@ -1,46 +1,29 @@
 <div align="center">
 
-# 🎞️ Soup Engine <sub><sup>beta</sup></sub>
+# 🎞️ Soup Engine for the Canon EOS 700D <sub><sup>beta</sup></sub>
 
-### Film looks, in the camera, on a Canon EOS 5D Classic or EOS 700D.
+### Film looks, in the camera, on a Canon EOS 700D / Rebel T5i / Kiss X7i.
 
-<br>
+`beta` &nbsp;·&nbsp; `GPL v2` &nbsp;·&nbsp; `13 film stocks` &nbsp;·&nbsp; `EOS 700D / Rebel T5i / Kiss X7i` &nbsp;·&nbsp; `firmware 1.1.5`
 
-<img src="doc/camera.gif" alt="scrolling the film stocks on the camera" width="620">
-
-<br>
-<br>
-
-`beta` &nbsp;·&nbsp; `GPL v2` &nbsp;·&nbsp; `13 film stocks` &nbsp;·&nbsp; `EOS 5D Classic` &nbsp;·&nbsp; `EOS 700D / Rebel T5i / Kiss X7i`
+A community port by [@GitariDev](https://github.com/GitariDev).
+<br>[← All cameras](../README.md#-pick-your-camera)
 
 </div>
 
 <br>
 
-Pick a film on the back screen. Every photo you take after that gets a
-second JPEG saved beside the raw, with the look already on it. On the
-5D Classic the **trash button** opens a list of film stocks; on the
-[EOS 700D](#-the-eos-700d--rebel-t5i--kiss-x7i) **INFO** opens a shelf of
-film cans.
+Pick a film on the back screen: **INFO** opens a shelf of film cans.
+Every photo you take after that gets a second JPEG saved beside the raw,
+with the look already on it.
 
 ```
 IMG_1234.CR2        your raw file, untouched
-IMG_1234.FLM.JPG    the same photo with the look on it
-                    (FLM_1234.JPG on the 700D, whose filesystem is 8.3)
+FLM_1234.JPG        the same photo with the look on it (the filesystem is 8.3)
 ```
 
 Your raw files are never modified. Delete the JPEG and the photo is
 exactly as the camera shot it.
-
-<br>
-
-![all thirteen film looks on one frame](doc/stocks.jpg)
-
-<div align="center"><sub>
-All thirteen, one frame, straight off the card.
-</sub></div>
-
-<br>
 
 > ⚠️ **Beta.** Unofficial code on your camera. It's easy to remove, and it
 > never modifies your raw files.
@@ -54,23 +37,15 @@ All thirteen, one frame, straight off the card.
 > All trademarks belong to their owners, and none of them has anything to
 > do with this project.
 
-> 📷 **Canon EOS 50D.** A community port by
-> [@rebelt2i](https://github.com/rebelt2i) lives on its own branch,
-> [`50d`](https://github.com/jiijii0/soup-engine/tree/50d).
-
-> 📷 **Canon EOS 700D / Rebel T5i / Kiss X7i.** A community port by
-> [@GitariDev](https://github.com/GitariDev) is
-> [further down this page](#-the-eos-700d--rebel-t5i--kiss-x7i).
-
 <br>
 
 ---
 
 <br>
 
-## 📷 The EOS 700D / Rebel T5i / Kiss X7i
+## 📷 About this port
 
-A second camera build, for the **EOS 700D** on firmware 1.1.5, as an
+This build is for the **EOS 700D** on firmware 1.1.5. It's an
 ordinary Magic Lantern module rather than a patched binary. You keep
 Magic Lantern's whole menu. The film screen, Home, Darkroom, Prints, Roll,
 Lens and System all run on the camera.
@@ -209,94 +184,6 @@ mid-frame, that frame is picked up again at the next start.
 
 <br>
 
-## 📦 Installing on the 5D Classic
-
-You need a **Canon EOS 5D Classic** (the original 2005 one, firmware
-1.1.1) and a CompactFlash card. The 5D build will not work on any other
-Canon: that camera-side code is built for this body's firmware.
-
-<br>
-
-### 1️⃣ &nbsp; Install Magic Lantern
-
-> ### 👉 [builds.magiclantern.fm/5DC.html](https://builds.magiclantern.fm/5DC.html)
-
-Follow their instructions, then check the camera starts and their menu
-opens before going further. Soup Engine never touches your camera's
-boot flag; their installer does that.
-
-<br>
-
-### 2️⃣ &nbsp; Back up their `autoexec.bin`
-
-Copy it off the card somewhere safe. Putting it back is how you
-uninstall.
-
-<br>
-
-### 3️⃣ &nbsp; Copy the files to the root of your card
-
-> ### 📦 [Download the latest release](https://github.com/jiijii0/soup-engine/releases/latest)
-
-Unzip to the card root, replacing `AUTOEXEC.BIN`. Or copy
-[`card/`](card) from this repo, which is the same files.
-
-| file | what it is |
-|:--|:--|
-| 📄 `AUTOEXEC.BIN` | replaces Magic Lantern's |
-| ⚙️ `SE.BIN` | the engine |
-| 🎞️ `ML/FILM/` | the film stocks |
-
-<br>
-
-### ✅ &nbsp; Put the card in and switch the camera on
-
-That's it. Nothing to enable, no menu to find.
-
-> While Soup Engine is installed you won't have Magic Lantern's own
-> menu, since this replaces the file that provides it. Put their
-> `autoexec.bin` back whenever you want it again.
-
-<br>
-
----
-
-<br>
-
-## 📷 Using it on the 5D Classic
-
-Press the **trash button** and the picker fills the screen.
-
-| button | what it does |
-|:--|:--|
-| 🎛️ **Wheel** | choose a film |
-| ↕️ **Up / Down** | choose where the look comes from |
-| ✅ **`SET`** | pick that film and close |
-| 🗑️ **Trash** | close, changing nothing |
-
-Your choice survives switching the camera off.
-
-Each photo takes about twenty seconds to develop. You can keep shooting
-while it works, and the screen shows `FRAME 2 OF 3` when there's a
-queue.
-
-<br>
-
-> ### ⚠️ Set your Picture Style to Standard, Neutral or Faithful
->
-> On Monochrome every look comes out black and white.
-
-<br>
-
-**`SOURCE: JPEG`** is the default. Use this.
-
-**`SOURCE: RAW`** works from the sensor data instead. It takes minutes
-rather than seconds, some colour adjustments can't be applied, and
-`ACROS` won't be black and white.
-
-`FILM SPEED 50` on the picker is only a label. It does not change your
-camera's ISO.
-
 <br>
 
 ---
@@ -331,20 +218,6 @@ matches what the camera writes.<br>Your photo never leaves your browser.
 
 <br>
 
-## 🧹 Removing it from the 5D Classic
-
-Put Magic Lantern's original `autoexec.bin` back. That's all.
-
-To pause it without uninstalling, delete `SE.BIN`. The camera boots
-normally without it.
-
-> 🆘 **If the camera ever misbehaves:** pull the battery, put the card
-> in a computer, delete `SE.BIN`. Don't delete `AUTOEXEC.BIN` while the
-> boot flag is on, because with the flag set and no `AUTOEXEC.BIN` the
-> camera won't start at all.
-
-<br>
-
 ---
 
 <br>
@@ -372,10 +245,13 @@ it to them. Open an issue here instead.
 
 <br>
 
+<br>
+
 ## 📄 Source and licence
 
-All of it is in [`src/`](src). `AUTOEXEC.BIN` is Magic Lantern's program
-with 215 bytes changed, and the script that applies them is there too.
+All of it is in [`src/`](src); the module itself is in
+[`src/ml/700d/`](src/ml/700d). Nothing of Magic Lantern's is committed
+here: `make card-700d` fetches their source at a pinned commit.
 
 GPL v2. See [LICENSE](LICENSE). Distributed **without any warranty**,
 including the implied warranties of merchantability and fitness for a

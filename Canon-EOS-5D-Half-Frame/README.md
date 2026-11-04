@@ -1,5 +1,7 @@
 # 🎞️ Soup Engine (v60: Half-Frame Diptych & Modernized Studio Edition)
 
+A community version by [@mmarco25](https://github.com/mmarco25). [← All cameras](../README.md#-pick-your-camera)
+
 ***In-Camera Analog Film Simulation & 35mm Half-Frame Diptych Engine for the Canon EOS 5D Classic (2005)***
 
 ---
@@ -7,7 +9,7 @@
 
 Soup Engine is an in-camera film simulation and development engine running on the Canon EOS 5D Classic 133 MHz ARM946E-S processor via Magic Lantern memory environment.
 
-This fork (jiijii0/soup-engine) is an half-frame first (Full Frame optional) version, transforming the 5D in a Half Frame camera. It operates like an analog film roll: you shoot freely at standard camera burst speeds without processing lag, then select the film stock (Film), set your desired parameters (Set) and finally develop  your captures when you choose via the in-camera batch darkroom (Lab).
+This version is a half-frame first (Full Frame optional) version, transforming the 5D in a Half Frame camera. It operates like an analog film roll: you shoot freely at standard camera burst speeds without processing lag, then select the film stock (Film), set your desired parameters (Set) and finally develop  your captures when you choose via the in-camera batch darkroom (Lab).
 
 This branch represents a comprehensive architectural overhaul:
 - **True 35mm Half-Frame Diptych Engine**: Combines pairs of consecutive 3:4 vertical frames into a single, bordered 3:2 landscape diptych inspired by classic half-frame cameras (such as the Olympus Pen F).
@@ -166,7 +168,7 @@ STOCK VELVIA
 Ensure you have a copy of your card working `AUTOEXEC.BIN` stored safely on your computer.
 2. **Download or Compile**:
 
-Compile the payload using the build instructions below or copy the pre-built files:
+Build `SE.BIN` with the instructions below (it is not shipped prebuilt yet), then copy it along with the files in `card/`:
 - Copy `SE.BIN` to the card root (`A:/ML/SE.BIN` or `A:/SE.BIN`).
 - Copy `AUTOEXEC.BIN` to the card root (replaces Magic Lantern loader with the Soup Engine hook).
 - Ensure stock look files exist in `A:/ML/FILM/*.fs` along with `A:/ML/FILM/INDEX.TXT`.
@@ -184,11 +186,12 @@ Soup Engine is built as an air-gapped freestanding bare-metal C99 binary compile
 - Host build tools: GNU `make`, `gcc`, `python3`.
 
 ### Compilation Steps
+`make payload` needs Magic Lantern's own 5D Classic `autoexec.bin` in
+`src/vendor/magiclantern-5Dc/`. It is theirs to distribute, so it is not
+included here.
 ```
-# Clone the repository and switch to the half-frame branch
-   git clone https://github.com/<your-fork>/soup-engine.git
-   cd soup-engine/src
-   git checkout half-frame-5d
+   git clone https://github.com/jiijii0/soup-engine.git
+   cd soup-engine/Canon-EOS-5D-Half-Frame/src
 
    # Clean previous build artifacts
    make clean
@@ -198,8 +201,8 @@ Soup Engine is built as an air-gapped freestanding bare-metal C99 binary compile
 
 ```
 Upon a successful build, the toolchain outputs:
-- `src/ml/build/AUTOEXEC.BIN` (ML loader trampoline).
-- `src/ml/build/SE.BIN`  (Soup Engine core payload).
+- `src/ml/build/AUTOEXEC.BIN` (ML loader trampoline, the same as the regular 5D one, also in `card/`).
+- `src/ml/build/SE.BIN`  (Soup Engine core payload, half-frame version).
 
 ---
 ## 🛠️ Diagnostics & Safety Recovery
