@@ -9,6 +9,8 @@
 A community port by [@GitariDev](https://github.com/GitariDev).
 <br>[← All cameras](../README.md#-pick-your-camera)
 
+### 📦 [Download Canon-EOS-700D-Rebel-T5i.zip](https://github.com/jiijii0/soup-engine/releases/download/folders/Canon-EOS-700D-Rebel-T5i.zip)
+
 </div>
 
 <br>

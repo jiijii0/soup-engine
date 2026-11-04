@@ -9,6 +9,8 @@
 A community port by [@rebelt2i](https://github.com/rebelt2i).
 <br>[← All cameras](../README.md#-pick-your-camera)
 
+### 📦 [Download Canon-EOS-50D.zip](https://github.com/jiijii0/soup-engine/releases/download/folders/Canon-EOS-50D.zip)
+
 </div>
 
 <br>

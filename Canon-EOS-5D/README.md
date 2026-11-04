@@ -13,6 +13,10 @@
 
 `beta` &nbsp;·&nbsp; `GPL v2` &nbsp;·&nbsp; `13 film stocks` &nbsp;·&nbsp; `EOS 5D Classic`
 
+[← All cameras](../README.md#-pick-your-camera)
+
+### 📦 [Download Canon-EOS-5D.zip](https://github.com/jiijii0/soup-engine/releases/download/folders/Canon-EOS-5D.zip)
+
 </div>
 
 <br>

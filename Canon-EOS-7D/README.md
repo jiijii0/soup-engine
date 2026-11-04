@@ -2,6 +2,8 @@
 
 Soup Engine for the original Canon EOS 7D, a community port by [@thebakers-club](https://github.com/thebakers-club). [← All cameras](../README.md#-pick-your-camera)
 
+### 📦 [Download Canon-EOS-7D.zip](https://github.com/jiijii0/soup-engine/releases/download/folders/Canon-EOS-7D.zip)
+
 Film looks developed inside the original Canon EOS 7D. Souper7D is a
 [Magic Lantern](https://www.magiclantern.fm/) module that runs your photos
 through 27 film stocks on the camera itself: pick a film, press SET, and a

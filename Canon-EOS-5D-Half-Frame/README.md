@@ -2,6 +2,8 @@
 
 A community version by [@mmarco25](https://github.com/mmarco25). [← All cameras](../README.md#-pick-your-camera)
 
+### 📦 [Download Canon-EOS-5D-Half-Frame.zip](https://github.com/jiijii0/soup-engine/releases/download/folders/Canon-EOS-5D-Half-Frame.zip)
+
 ***In-Camera Analog Film Simulation & 35mm Half-Frame Diptych Engine for the Canon EOS 5D Classic (2005)***
 
 ---
