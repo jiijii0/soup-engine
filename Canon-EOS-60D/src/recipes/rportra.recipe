@@ -1,0 +1,16 @@
+NAME     REGGIES PORTRA
+RECIPE   Reggie's Portra (X-Trans IV)
+CREDIT   Reggie Ballesteros, published by Ritchie Roesch / Fuji X Weekly
+SOURCE   https://fujixweekly.com/2022/06/11/fujifilm-x-trans-iv-film-simulation-recipe-reggies-portra/
+DESC     WARM SOFT PORTRA, KIND SKIN, MUTED GREENS
+BASE     classicchrome.fs
+WB       AUTO
+SHIFT    +2 -4
+DR       AUTO
+HIGHLIGHT -1
+SHADOW   -1
+COLOR    +2
+CLARITY  0
+GRAIN    WEAK SMALL
+CCE      STRONG
+CCFXB    WEAK

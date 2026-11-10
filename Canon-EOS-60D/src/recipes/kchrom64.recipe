@@ -1,0 +1,16 @@
+NAME     KODACHROME 64
+RECIPE   Kodachrome 64 (X-Trans V version)
+CREDIT   Ritchie Roesch / Fuji X Weekly
+SOURCE   https://fujixweekly.com/2022/11/28/kodachrome-64-fujifilm-x-t5-x-trans-v-film-simulation-recipe
+DESC     RICH REDS, DEEP SKIES, CRISP SLIDE CONTRAST
+BASE     classicchrome.fs
+WB       DAYLIGHT
+SHIFT    +2 -5
+DR       200
+HIGHLIGHT 0
+SHADOW   +0.5
+COLOR    +2
+CLARITY  +3
+GRAIN    WEAK SMALL
+CCE      STRONG
+CCFXB    OFF

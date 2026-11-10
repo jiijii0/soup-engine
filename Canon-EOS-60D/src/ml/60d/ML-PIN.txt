@@ -1,0 +1,8 @@
+soup.mo is built and checked against the official Magic Lantern 60D build:
+  magiclantern.2025-06-20.60D.111.zip  (builds.magiclantern.fm/60D.html)
+  SHA256 12ffa7acff0a9a0c81b9bdc9b5e5a06f00a2523c6ecb27fbe4f121a09b242a8b
+Commit ed3e7c0dfacfdeaf3349dee73edf9e3621217462
+https://github.com/reticulatedpines/magiclantern_simplified
+
+Build with that commit checked out, so the module matches the ML on the card.
+Never commit ROM0.BIN / ROM1.BIN: they are Canon's firmware.
