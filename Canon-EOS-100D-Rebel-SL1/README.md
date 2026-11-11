@@ -4,7 +4,10 @@
 
 ### Film looks, in the camera, on a Canon EOS 100D (Rebel SL1, Kiss X7).
 
-`GPL v2` &nbsp;·&nbsp; `28 film stocks` &nbsp;·&nbsp; `firmware 1.0.1` &nbsp;·&nbsp; `Magic Lantern 100D.101`
+`beta` &nbsp;·&nbsp; `GPL v2` &nbsp;·&nbsp; `28 film stocks` &nbsp;·&nbsp; `EOS 100D / Rebel SL1 / Kiss X7` &nbsp;·&nbsp; `firmware 1.0.1` &nbsp;·&nbsp; `Magic Lantern 100D.101`
+
+A community port by [@lbrock3](https://github.com/lbrock3).
+<br>[← All cameras](../README.md#-pick-your-camera)
 
 ### 📦 [Download Canon-EOS-100D-Rebel-SL1.zip](https://github.com/jiijii0/soup-engine/releases/download/folders/Canon-EOS-100D-Rebel-SL1.zip)
 

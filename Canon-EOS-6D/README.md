@@ -4,7 +4,10 @@
 
 ### Film looks, in the camera, on a Canon EOS 6D (the original, not the Mark II).
 
-`GPL v2` &nbsp;·&nbsp; `28 film stocks` &nbsp;·&nbsp; `firmware 1.1.6` &nbsp;·&nbsp; `Magic Lantern 6D.116`
+`beta` &nbsp;·&nbsp; `GPL v2` &nbsp;·&nbsp; `28 film stocks` &nbsp;·&nbsp; `EOS 6D` &nbsp;·&nbsp; `firmware 1.1.6` &nbsp;·&nbsp; `Magic Lantern 6D.116`
+
+A community port by [@lbrock3](https://github.com/lbrock3).
+<br>[← All cameras](../README.md#-pick-your-camera)
 
 ### 📦 [Download Canon-EOS-6D.zip](https://github.com/jiijii0/soup-engine/releases/download/folders/Canon-EOS-6D.zip)
 

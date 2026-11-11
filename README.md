@@ -11,7 +11,7 @@
 <br>
 <br>
 
-`beta` &nbsp;·&nbsp; `GPL v2` &nbsp;·&nbsp; `5 cameras` &nbsp;·&nbsp; `Magic Lantern`
+`beta` &nbsp;·&nbsp; `GPL v2` &nbsp;·&nbsp; `8 cameras` &nbsp;·&nbsp; `Magic Lantern`
 
 </div>
 
@@ -174,8 +174,10 @@ exactly as its author tested it.
 To everyone who ported it:
 [@rebelt2i](https://github.com/rebelt2i) (50D),
 [@GitariDev](https://github.com/GitariDev) (700D),
-[@thebakers-club](https://github.com/thebakers-club) (7D) and
-[@mmarco25](https://github.com/mmarco25) (5D half frame).
+[@thebakers-club](https://github.com/thebakers-club) (7D),
+[@mmarco25](https://github.com/mmarco25) (5D half frame),
+[@kookueh](https://github.com/kookueh) (60D) and
+[@lbrock3](https://github.com/lbrock3) (6D and 100D).
 
 None of this would exist without [Magic Lantern](https://magiclantern.fm).
 Soup Engine runs inside their work. Their builds are what let these
