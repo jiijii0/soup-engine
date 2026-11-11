@@ -1,0 +1,16 @@
+NAME     PORTRA 400 V2
+RECIPE   Kodak Portra 400 v2 (X-Trans IV)
+CREDIT   Ritchie Roesch / Fuji X Weekly
+SOURCE   https://fujixweekly.com/2022/12/16/kodak-portra-400-v2-fujifilm-x-t5-x-trans-v-film-simulation-recipe/
+DESC     GOLDEN-HOUR PORTRA, YELLOW-GREEN LEAN
+BASE     classicchrome.fs
+WB       5200K
+SHIFT    +1 -6
+DR       400
+HIGHLIGHT 0
+SHADOW   -2
+COLOR    +2
+CLARITY  -2
+GRAIN    STRONG SMALL
+CCE      STRONG
+CCFXB    WEAK

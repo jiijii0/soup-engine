@@ -1,0 +1,16 @@
+NAME     REGGIES SUPERIA
+RECIPE   Reggie's Superia (X-Trans IV and V)
+CREDIT   Reggie Ballesteros, published by Ritchie Roesch / Fuji X Weekly
+SOURCE   https://fujixweekly.com/2026/03/12/reggies-superia-a-fujifilm-recipe-for-x-trans-iv-v-cameras/
+DESC     MOODY FUJICOLOR NEGATIVE, GREEN TINT, GRAINY
+BASE     classicneg.fs
+WB       AUTO
+SHIFT    +1 -3
+DR       AUTO
+HIGHLIGHT -2
+SHADOW   -1
+COLOR    +1
+CLARITY  0
+GRAIN    STRONG LARGE
+CCE      STRONG
+CCFXB    STRONG

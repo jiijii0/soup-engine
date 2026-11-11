@@ -1,0 +1,17 @@
+NAME     VINTAGE KODACHROME
+RECIPE   Vintage Kodachrome (X-Trans III)
+CREDIT   Ritchie Roesch / Fuji X Weekly
+SOURCE   https://fujixweekly.com/2017/10/21/my-fujifilm-x100f-vintage-kodachrome-film-simulation-recipe/
+DESC     1935-60 KODACHROME, BRONZE SKIN, CYAN SKY
+NOTE     X-Trans III recipe: no Color Chrome settings; "Grain Strong" read as Strong, Large.
+BASE     classicchrome.fs
+WB       AUTO
+SHIFT    +2 -4
+DR       200
+HIGHLIGHT +4
+SHADOW   -2
+COLOR    +4
+CLARITY  0
+GRAIN    STRONG LARGE
+CCE      OFF
+CCFXB    OFF

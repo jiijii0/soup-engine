@@ -1,0 +1,8 @@
+# macOS Finder files
+.DS_Store
+# Canon firmware dumps (for qemu-eos testing): never commit these
+ROM*.BIN
+# build output of the desktop test and the engine
+*.o
+*.d
+host_test
