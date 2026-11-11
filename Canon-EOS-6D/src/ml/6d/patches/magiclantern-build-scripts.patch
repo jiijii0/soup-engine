@@ -1,0 +1,111 @@
+diff --git a/modules/html2text.py b/modules/html2text.py
+index 6c1c3cb72..14ecff644 100644
+--- a/modules/html2text.py
++++ b/modules/html2text.py
+@@ -42,10 +42,9 @@ from align_string_proportional import word_wrap
+ from rbf_read import extent_func, rbf_init_font
+ # allow running from modules/some_module and
+ # modules/some_category/some_module
+-try:
+-    rbf_init_font("../../data/fonts/argnor23.rbf")
+-except FileNotFoundError:
+-    rbf_init_font("../../../data/fonts/argnor23.rbf")
++import os
++rbf_init_font(os.path.join(os.path.dirname(os.path.abspath(__file__)),
++                           "..", "data", "fonts", "argnor23.rbf"))
+ 
+ wrap = lambda text, width: word_wrap(text, width, extent_func)
+ 
+diff --git a/modules/readme2modulestrings.py b/modules/readme2modulestrings.py
+index 65dcb1bcb..34cba2971 100755
+--- a/modules/readme2modulestrings.py
++++ b/modules/readme2modulestrings.py
+@@ -1,7 +1,7 @@
+ #!/usr/bin/env python3
+ # extract module strings from README.rst
+ 
+-import sys, re
++import sys, re, shlex
+ import subprocess
+ import os
+ from datetime import datetime
+@@ -9,12 +9,10 @@ from datetime import datetime
+ from align_string_proportional import word_wrap
+ from rbf_read import extent_func, rbf_init_font
+ 
+-# allow running from modules/some_module and
+-# modules/some_category/some_module
+-try:
+-    rbf_init_font("../../data/fonts/argnor23.rbf")
+-except FileNotFoundError:
+-    rbf_init_font("../../../data/fonts/argnor23.rbf")
++# the font and html2text.py live relative to this script, not to the
++# module being built -- which need not be inside this tree at all
++MODULES_DIR = os.path.dirname(os.path.abspath(__file__))
++rbf_init_font(os.path.join(MODULES_DIR, "..", "data", "fonts", "argnor23.rbf"))
+ 
+ def run(cmd):
+     try:
+@@ -61,9 +59,8 @@ def declare_string_section():
+     
+ def is_command_available(name):
+     """Check if command `name` is on PATH."""
+-    import distutils.spawn
+-    from distutils.spawn import find_executable
+-    return find_executable(name) is not None
++    import shutil
++    return shutil.which(name) is not None
+ 
+ # return the first command of the list that can be found on the OS
+ def get_command_of(commands):
+@@ -123,11 +120,7 @@ if "Summary" not in tags:
+ rst2htmlCommands = ["rst2html", "rst2html5", "rst2html.py", "rst2html5.py"]
+ rst2htmlCommand = get_command_of(rst2htmlCommands)
+ 
+-# allow running from some_module/
+-# or some_category/some_module/
+-HTML2TEXT_PATH = "../html2text.py"
+-if not os.path.isfile(HTML2TEXT_PATH):
+-    HTML2TEXT_PATH = "../" + HTML2TEXT_PATH
++HTML2TEXT_PATH = os.path.join(MODULES_DIR, "html2text.py")
+ 
+ # SJE FIXME why are we shelling out to python when we're already using python?
+ # This could all be replaced with native python code.
+@@ -135,7 +128,7 @@ if not os.path.isfile(HTML2TEXT_PATH):
+ # render the RST as html -> txt without the metadata tags
+ # sed command at end is because Windows inserts CR characters all over the place. Removing them should be benign on other platforms. 
+ txt = run('cat build/README.rst | grep -v -E "^:([^:])+:.+$" | ' + rst2htmlCommand
+-          + ' | python3 ' + HTML2TEXT_PATH + ' -b 700 | sed "s/\r$//"')
++          + ' | python3 ' + shlex.quote(HTML2TEXT_PATH) + ' -b 700 | sed "s/\r$//"')
+ 
+ desc = ""
+ last_str = "Description"
+@@ -160,12 +153,8 @@ add_string(last_str, desc)
+ 
+ # allow running from some_module/
+ # or some_category/some_module/
+-LAST_CHANGE_PATH = "../last_change_info.sh"
+-if not os.path.isfile(LAST_CHANGE_PATH):
+-    LAST_CHANGE_PATH = "../" + LAST_CHANGE_PATH
+-# extract version info
+-# (prints the latest changeset that affected this module)
+-last_change_info = run("sh " + LAST_CHANGE_PATH)
++LAST_CHANGE_PATH = os.path.join(MODULES_DIR, "last_change_info.sh")
++last_change_info = run("sh " + shlex.quote(LAST_CHANGE_PATH))
+ 
+ if len(last_change_info):
+     last_change_date, last_changeset, author, commit_msg = last_change_info.split("\n")
+@@ -192,11 +181,8 @@ if len(last_change_info):
+ 
+ build_date = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+ 
+-# echo called from python in Windows behaves differently, better to avoid it.
+-if sys.platform == 'win32':
+-    build_user = run('whoami').replace("\n", "") + "@" + run('hostname').replace("\n", "")
+-else:
+-    build_user = run("echo `whoami`@`hostname`")
++# A module gets passed around; whoever built it should not be written into it.
++build_user = "soup-engine"
+ 
+ add_string("Build date", build_date)
+ add_string("Build user", build_user)
