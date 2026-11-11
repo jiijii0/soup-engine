@@ -1,0 +1,12 @@
+# Not ours to distribute, so never committed:
+#   vendor/   Magic Lantern binaries, its source checkout, Canon ROM dumps
+#   samples/  the owner's own photos
+# Both are needed for the 6D module build; see ml/6d/Makefile.
+vendor/
+samples/
+
+# Build output of the desktop tools (make all) and the ARM check (make arm)
+*.o
+*.d
+filmdev
+out/
