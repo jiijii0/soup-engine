@@ -62,11 +62,12 @@ instructions, and the download for that camera.
 |:--|:--|:--|:--|
 | 📷 | **[Canon EOS 5D Classic](Canon-EOS-5D)** | 1.1.1 | [@jiijii0](https://github.com/jiijii0) |
 | 🎞️ | **[Canon EOS 5D Classic, Half Frame](Canon-EOS-5D-Half-Frame)** | 1.1.1 | [@mmarco25](https://github.com/mmarco25) |
+| 📷 | **[Canon EOS 6D](Canon-EOS-6D)** (original, not Mark II) | 1.1.6 | [@lbrock3](https://github.com/lbrock3) |
 | 📷 | **[Canon EOS 7D](Canon-EOS-7D)** (original, not Mark II) | 2.0.3 | [@thebakers-club](https://github.com/thebakers-club) |
 | 📷 | **[Canon EOS 50D](Canon-EOS-50D)** | 1.0.9 | [@rebelt2i](https://github.com/rebelt2i) |
 | 📷 | **[Canon EOS 60D](Canon-EOS-60D)** | 1.1.1 | [@kookueh](https://github.com/kookueh) |
+| 📷 | **[Canon EOS 100D / Rebel SL1 / Kiss X7](Canon-EOS-100D-Rebel-SL1)** | 1.0.1 | [@lbrock3](https://github.com/lbrock3) |
 | 📷 | **[Canon EOS 700D / Rebel T5i / Kiss X7i](Canon-EOS-700D-Rebel-T5i)** | 1.1.5 | [@GitariDev](https://github.com/GitariDev) |
-| 📷 | **[Canon EOS 6D](Canon-EOS-6D)** (original, not Mark II) | 1.1.6 | [@lbrock3](https://github.com/lbrock3) |
 
 <br>
 
