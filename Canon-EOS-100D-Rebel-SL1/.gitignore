@@ -1,0 +1,2 @@
+# macOS Finder files. src/.gitignore only covers src/.
+.DS_Store
