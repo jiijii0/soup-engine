@@ -1,6 +1,7 @@
 #include "ui.h"
 #include "cr2.h"
 #include "se_libc.h"
+#include "speed.h"
 
 /* ====================================================== primitives ==== */
 
@@ -347,47 +348,69 @@ typedef struct { uint8_t accent; const char *iso; } se_stock_look;
 
 /*
  * The number on the band is the FILM's rated speed -- Velvia is a 50,
- * Portra a 400 -- and nothing else. The engine never touches the camera's
- * ISO, and must not: Canon's exposure settings are properties, and writing
- * a property is forbidden here because they live in NVRAM.
+ * Portra 160 a 160 -- and nothing else. The engine never touches the
+ * camera's ISO, and must not: Canon's exposure settings are properties,
+ * and writing a property is forbidden here because they live in NVRAM.
  *
  * So the band says "FILM SPEED 50" rather than "ISO 50". The same number,
  * and no way to read it as something the camera is about to do.
+ *
+ * The speed comes from speed.h (the number in the name, else its table),
+ * the same one the 5D Mark II module's "Film sets ISO" uses, so the card
+ * never names a speed the camera then does not set.
  */
 /*
- * name_is() matches a PREFIX, so order and length both matter here.
- * "CLASSIC" would make the two Classics indistinguishable -- hence
- * "CLASSIC CH" and "CLASSIC N".
- * A stock with no entry gets a hashed accent and 200, which is fine for a
- * stock someone drops on the card but not for one that ships.
+ * The accent colour, by name. name_is() matches a PREFIX, so order and
+ * length both matter here. "CLASSIC" would make the two Classics
+ * indistinguishable -- hence "CLASSIC CH" and "CLASSIC N".
+ * A stock with no entry gets a hashed accent, which is fine for a stock
+ * someone drops on the card.
  */
-static const struct { const char *key; se_stock_look lk; } g_looks[] = {
+static const struct { const char *key; uint8_t accent; } g_looks[] = {
     /* the Fujifilm simulations */
-    { "PROVIA",     { SE_C_SLATE,  "FILM SPEED 100" } },
-    { "VELVIA",     { SE_C_OLIVE,  "FILM SPEED 50"  } },
-    { "ASTIA",      { SE_C_PLUM,   "FILM SPEED 100" } },
-    { "CLASSIC CH", { SE_C_MID,    "FILM SPEED 200" } },
-    { "CLASSIC N",  { SE_C_TEAL,   "FILM SPEED 400" } },
-    { "NOSTALGIC",  { SE_C_RUST,   "FILM SPEED 400" } },
-    { "ETERNA",     { SE_C_EDGE,   "FILM SPEED 250" } },
-    { "BLEACH",     { SE_C_SHADOW, "FILM SPEED 400" } },
-    { "ACROS",      { SE_C_INK,    "FILM SPEED 100" } },
-    { "REALA",      { SE_C_HILITE, "FILM SPEED 100" } },
+    { "PROVIA",     SE_C_SLATE  },
+    { "VELVIA",     SE_C_OLIVE  },
+    { "ASTIA",      SE_C_PLUM   },
+    { "CLASSIC CH", SE_C_MID    },
+    { "CLASSIC N",  SE_C_TEAL   },
+    { "NOSTALGIC",  SE_C_RUST   },
+    { "ETERNA",     SE_C_EDGE   },
+    { "BLEACH",     SE_C_SHADOW },
+    { "ACROS",      SE_C_INK    },
+    { "REALA",      SE_C_HILITE },
     /* and the few that are not Fuji */
-    { "SOUP 800",   { SE_C_RED,    "FILM SPEED 800" } },
-    { "GOLD",       { SE_C_GOLD,   "FILM SPEED 200" } },
-    { "PORTRA",     { SE_C_AMBER,  "FILM SPEED 400" } },
+    { "SOUP 800",   SE_C_RED    },
+    { "GOLD",       SE_C_GOLD   },
+    { "PORTRA",     SE_C_AMBER  },
     /* the Fujifilm Recipes (src/recipes), named for the film each one is
      * after. Vintage Kodachrome is the 1935-60 film, rated ASA 10. */
-    { "REGGIES P",  { SE_C_AMBER,  "FILM SPEED 400" } },
-    { "KODACHROME", { SE_C_RED,    "FILM SPEED 64"  } },
-    { "VINTAGE K",  { SE_C_RUST,   "FILM SPEED 10"  } },
-    { "PACIFIC",    { SE_C_TEAL,   "FILM SPEED 400" } },
-    { "REGGIES S",  { SE_C_OLIVE,  "FILM SPEED 400" } },
-    { "VERICOLOR",  { SE_C_PLUM,   "FILM SPEED 160" } },
-    { "TRI-X",      { SE_C_INK,    "FILM SPEED 400" } },
+    { "REGGIES P",  SE_C_AMBER  },
+    { "KODACHROME", SE_C_RED    },
+    { "VINTAGE K",  SE_C_RUST   },
+    { "PACIFIC",    SE_C_TEAL   },
+    { "REGGIES S",  SE_C_OLIVE  },
+    { "VERICOLOR",  SE_C_PLUM   },
+    { "TRI-X",      SE_C_INK    },
 };
 #define SE_NLOOKS ((int)(sizeof g_looks / sizeof g_looks[0]))
+
+/* "FILM SPEED 3200", "DIGITAL" or "NO FILM SPEED". One card is drawn at a
+ * time and the text is used at once, so one buffer does. */
+static const char *speed_text(const char *name)
+{
+    static char buf[24];
+    static const char pre[] = "FILM SPEED ";
+    char dig[8];
+    int s = se_box_speed(name), n = 0, i;
+
+    if (s == SE_SPEED_DIGITAL) return "DIGITAL";
+    if (s <= 0) return "NO FILM SPEED";
+    while (s && n < 7) { dig[n++] = (char)('0' + s % 10); s /= 10; }
+    for (i = 0; pre[i]; i++) buf[i] = pre[i];
+    while (n) buf[i++] = dig[--n];
+    buf[i] = 0;
+    return buf;
+}
 
 static se_stock_look stock_look(const char *name)
 {
@@ -399,12 +422,12 @@ static se_stock_look stock_look(const char *name)
     int i;
 
     if (!name) name = "?";
+    lk.iso = speed_text(name);
     for (i = 0; i < SE_NLOOKS; i++)
-        if (name_is(name, g_looks[i].key)) return g_looks[i].lk;
+        if (name_is(name, g_looks[i].key)) { lk.accent = g_looks[i].accent; return lk; }
 
     for (i = 0; name[i]; i++) h = (h ^ (unsigned char)name[i]) * 16777619u;
     lk.accent = pick[h % 7u];
-    lk.iso    = "FILM SPEED 200";
     return lk;
 }
 
@@ -742,8 +765,11 @@ static void draw_stock(const se_ui *u, se_ui_fb *fb)
     /* the icon and the name as one centred unit, then the band of colour */
     {
         const char *nm = u->stocks[cur].name ? u->stocks[cur].name : "?";
-        se_stock_look lk = stock_look(u->stocks[cur].name);
-        const char *const *art = stock_icon(u->stocks[cur].name);
+        /* a favourite is listed as "* NAME" (the 5D Mark II module); its
+         * colour, icon and speed are still NAME's */
+        const char *key = (nm[0] == '*' && nm[1] == ' ') ? nm + 2 : nm;
+        se_stock_look lk = stock_look(key);
+        const char *const *art = stock_icon(key);
         static const int ladder[4] = { 7, 6, 5, 4 };
         const int is = 2, gap = 18;
         int iw = SE_ICON_N * is * 2;           /* 2:1 pixels, see draw_icon */

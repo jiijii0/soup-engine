@@ -52,7 +52,7 @@ FILM/100CANON/FLM_1234.JPG    the same photo with the look on it
 | | |
 |:--|:--|
 | Module source | adapted from the 60D module, see [What changed from the 60D port](#-what-changed-from-the-60d-port) |
-| Builds against ML `5D2.212` | yes: `soup.mo` 122,000 bytes (about 115 KB resident); all 96 functions it imports are exported by `5D2.212`; relocations only `R_ARM_ABS32` / `R_ARM_CALL` / `R_ARM_JUMP24`; no `%c` in its strings |
+| Builds against ML `5D2.212` | yes: `soup.mo` 122,688 bytes (about 116 KB resident; the 115 KB build started on the camera with no Err 70); all 96 functions it imports are exported by `5D2.212`; relocations only `R_ARM_ABS32` / `R_ARM_CALL` / `R_ARM_JUMP24`; no `%c` in its strings |
 | Loads on a 5D Mark II | yes, first try (2026-11-15): reads all 21 stocks, finds the CF card as `A:`. Nothing was developed then: Film was left OFF, and the card's folder was `108_FUJI`, which the module couldn't find (fixed since, see below) |
 | Finds the real DCIM folder | yes: `dcim_test.c` passes 16 checks, and on the camera the module found `A:/DCIM/108_FUJI` where Magic Lantern said `108EOS5D` |
 | Develops on a desktop | yes: the module's own `soup_dev.c` (`host_test.c`) on a synthetic 5616×3744 "Canon EOS 5D Mark II" CR2 gives a 2800×1872 film JPEG with Velvia, Portra, Acros and Soup 800; peak memory about 1.5 MB, nothing leaked |
@@ -64,7 +64,7 @@ FILM/100CANON/FLM_1234.JPG    the same photo with the look on it
 | Size FULL (5616×3744) | yes (2026-11-15): a JPEG L became a 5616×3744, quality 95, 7.8 MB film JPEG (Canon's own JPEG L of the frame: 10.2 MB) in **121 s**, Ektar 100. The frame before, at HALF: **42 s** |
 | RAW+JPEG source | added: the camera's JPEG L is used when it is at least as large as the CR2's preview, the CR2 otherwise; tested on a PC. Not yet tried on the camera |
 | Film-tinted thumbnails | added: film files now carry a thumbnail in the film's look (before, they had none: Canon's 9.9 KB thumbnail didn't fit the 8 KB EXIF block). Tested on a PC; main image byte-for-byte unchanged |
-| Film sets ISO | added, OFF by default; box speeds tested on a PC. Not yet tried on the camera |
+| Film sets ISO | on the camera: Portra 160 set ISO 160. The picker card showed FILM SPEED 400 for it (its own, older table); both now use `speed.h`. Rest of the test pending |
 | Favourite films | added: INFO in the picker. Not yet tried on the camera |
 | Playback toggle (SET in playback) | added, **experimental**: the camera learns where Canon keeps the photo on screen over three or more SET presses in playback. Not yet tried on the camera |
 | Picker on the 4:3 screen | drawn 8/9 as tall to undo the 4:3 panel's squeeze (previewed on a PC). Not yet seen on the camera |
@@ -167,9 +167,12 @@ DONE** or **FILM FAILED** for a moment.
 
 With **Film sets ISO** ON (Shoot → Soup Film, OFF by default), loading a
 film sets the camera to its box speed, as loading a roll would: Tri-X 400
-at 400, Portra 160 at 160, Delta 3200 at 3200. Velvia, Kodachrome 64 and
-Classic Chrome get 100 (the 5D Mark II's lowest native ISO), 5D Classic and
-Pacific Blues leave ISO alone, and nothing goes past 6400. It happens only
+at 400, Portra 160 at 160, Delta 3200 at 3200. The speed is the one on the
+film's card in the picker (**FILM SPEED**): the number in the film's name,
+or for names without one the speed the original picker gave it (Classic
+Chrome 200, Eterna 250). Velvia 50, Kodachrome 64 and Vintage Kodachrome
+10 get 100 (the 5D Mark II's lowest native ISO), 5D Classic (its card says
+**DIGITAL**) leaves ISO alone, and nothing goes past 6400. It happens only
 when you load a film, only in P, Tv, Av and M: an ISO you set afterwards
 stays. The menu line shows what the film shown would set.
 
@@ -328,9 +331,10 @@ stay where they are. If the camera ever hangs, take the battery out.
   film version (any key puts Canon's picture back): delete `ML/SE.PLY` and
   send `SOUP.LOG`. An address found for certain can be fixed in
   `soup_play_current()` in [`src/ml/5d2/soup.c`](src/ml/5d2/soup.c).
-- **The module is about 115 KB resident.** On the 7D port, growing past
-  about 119 KB risked Err 70 at start-up. If this build gives Err 70 on a
-  5D Mark II, go back to the previous `soup.mo` and say so.
+- **The module is about 116 KB resident.** On the 7D port, growing past
+  about 119 KB risked Err 70 at start-up. The 115 KB build started fine on
+  a 5D Mark II; if a later one gives Err 70, go back to the previous
+  `soup.mo` and say so.
 - **SET in playback belongs to Soup** while the module is loaded, so Magic
   Lantern's "SET + dial" playback shortcuts won't see it.
 - **The screen is 4:3.** The picker is drawn 8/9 as tall to keep its
@@ -354,6 +358,7 @@ stay where they are. If the camera ever hangs, take the battery out.
 | `src/ml/5d2/soup.c`, `soup_dcim.h`, `dcim_test.c` | Develop older: a job (last 1/5/20 frames or every photo in the folder) run frame by frame when no new shot is waiting, with Replace existing; one shared develop function for new and older frames; ML's `powersave_prohibit()` held while anything develops, as the 7D does, so auto power-off can't cut a FULL develop short |
 | `src/ml/5d2/soup.c`, `soup_dev.c`, `host_test.c` | RAW+JPEG develops the JPEG L when it is at least the CR2 preview's size (`host_test --pick`); the film file's EXIF thumbnail is the source's thumbnail through the film's look, after the 7D port's `graded_thumb` |
 | `src/ml/5d2/soup.c`, `soup_iso.h` | Film sets ISO, after the 6D port: box speed from the film name or a table, clamped to 100–6400, set only on loading a film, P/Tv/Av/M only |
+| `src/engine/speed.h`, `ui.c` | one box-speed table for the picker card's FILM SPEED band and Film sets ISO: the card used to show 400 for Portra 160 and 800, and 200 for most of the added films. 5D Classic's card says DIGITAL |
 | `src/ml/5d2/soup.c`, `soup_ui.c` | favourite films first (INFO in the picker, `ML/SE.FAV`); playback toggle with an on-camera learned address (`ML/SE.PLY`); the picker drawn 8/9 as tall for the 4:3 panel |
 | `src/ml/5d2/soup_ui.c` | the playback log line no longer reads the 60D's addresses; notes on SET (C.Fn IV-3) and the 4:3 screen |
 | `src/ml/5d2/soup_dev.c` | EXIF model fallback is `Canon EOS 5D Mark II` |

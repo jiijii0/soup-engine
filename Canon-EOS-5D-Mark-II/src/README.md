@@ -59,10 +59,11 @@ cc -O2 -std=gnu99 -DSOUP_HOST -I$E -I$M -o host_test $M/host_test.c $M/soup_dev.
 
 `ml/5d2/dcim_test.c` checks how the module picks the DCIM folder the
 camera is really writing to (`soup_dcim.h`), including a card whose folder
-another camera made (`108_FUJI`):
+another camera made (`108_FUJI`), and each film's box speed (`speed.h`,
+shared by the picker card and Film sets ISO):
 
 ```sh
-cc -std=gnu99 -o dcim_test src/ml/5d2/dcim_test.c && ./dcim_test
+cc -std=gnu99 -Isrc/engine -o dcim_test src/ml/5d2/dcim_test.c && ./dcim_test
 ```
 
 ## Emulator

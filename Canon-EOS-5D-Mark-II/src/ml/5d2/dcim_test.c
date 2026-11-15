@@ -1,7 +1,7 @@
 /*
  * dcim_test.c - check soup_dcim.h's folder picking on the desktop.
  *
- *   cc -std=gnu99 -o dcim_test dcim_test.c && ./dcim_test
+ *   cc -std=gnu99 -I../../engine -o dcim_test dcim_test.c && ./dcim_test
  *
  * The first case is the card the 5D Mark II was first tried with: a
  * Fujifilm had made DCIM/100_FUJI and DCIM/108_FUJI, the camera wrote
@@ -87,10 +87,12 @@ int main(void)
         static const struct { const char *name; int iso; int raw; } fi[] = {
             { "TRI-X 400", 400, 88 },      { "DELTA 3200", 3200, 112 },  { "VISION3 250D", 250, 83 },
             { "EKTACHROME E100", 100, 72 }, { "PORTRA 160", 160, 77 },    { "PORTRA 800", 800, 96 },
-            { "VELVIA", 100, 72 },         { "KODACHROME 64", 100, 72 }, { "CLASSIC CHROME", 100, 72 },
+            { "VELVIA", 100, 72 },         { "KODACHROME 64", 100, 72 }, { "CLASSIC CHROME", 200, 80 },
             { "HP5 PLUS", 400, 88 },       { "VERICOLOR III", 160, 77 }, { "PORTRA 400 V2", 400, 88 },
-            { "5D CLASSIC", 0, 0 },        { "PACIFIC BLUES", 0, 0 },    { "STANDARD", 0, 0 },
+            { "5D CLASSIC", 0, 0 },        { "PACIFIC BLUES", 400, 88 }, { "STANDARD", 0, 0 },
             { "SOUP 800", 800, 96 },       { "PRO 400H", 400, 88 },      { "T-MAX 400", 400, 88 },
+            { "ETERNA", 250, 83 },         { "NOSTALGIC NEG", 400, 88 }, { "BLEACH BYPASS", 400, 88 },
+            { "VINTAGE KODACHROME", 100, 72 }, { "REGGIES SUPERIA", 400, 88 }, { "EKTAR 100", 100, 72 },
         };
         unsigned i;
         for (i = 0; i < sizeof fi / sizeof fi[0]; i++) {
