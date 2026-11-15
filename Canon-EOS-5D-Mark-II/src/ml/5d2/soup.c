@@ -443,15 +443,17 @@ static void soup_drive(char *drive, int n)
 
 /*
  * The DCIM folder the camera is really writing to (see soup_dcim.h for
- * why get_dcim_dir() can be wrong). Looked up only by the develop task,
- * only when it has a frame to develop, and listed again only when the
- * folder number changes, or (at most every 10 s) when the folder found
- * before is gone (card swapped). Everyone else reads the copy.
+ * why get_dcim_dir() can be wrong). Looked up by the develop task when it
+ * has a frame to develop, and by playback learning (UI task), so the
+ * lookup takes dcim_sem. Listed again only when the folder number
+ * changes, or (at most every 10 s) when the folder found before is gone
+ * (card swapped). Everyone else reads the copy.
  */
 #define DCIM_MAX 24
 static char soup_dcim[FILM_PATH];      /* "A:/DCIM/108_FUJI"; "" = not yet */
 static int  soup_dcim_folder = -1;
 static int  soup_dcim_ms;
+static struct semaphore *dcim_sem;
 
 static int soup_dcim_has_frame(void *ctx, const char *name)
 {
@@ -464,7 +466,16 @@ static int soup_dcim_has_frame(void *ctx, const char *name)
     return is_file(p);
 }
 
+static void soup_dcim_refresh_locked(int folder, int num);
+
 static void soup_dcim_refresh(int folder, int num)
+{
+    if (dcim_sem) take_semaphore(dcim_sem, 0);
+    soup_dcim_refresh_locked(folder, num);
+    if (dcim_sem) give_semaphore(dcim_sem);
+}
+
+static void soup_dcim_refresh_locked(int folder, int num)
 {
     char names[DCIM_MAX][16];
     const char *ptrs[DCIM_MAX];
@@ -592,15 +603,22 @@ static int soup_folder_now(void)
 /*
  * Learning where Canon keeps "the photo on screen".
  *
- * Each SET in playback, while the address is unknown, scans Canon's low
- * memory for 32-bit words holding a frame that exists in the current
- * folder, either as the plain number (8663) or packed as on the 60D
- * (108 << 16 | 8663). The first press collects the candidates; every
- * later press, on a different photo, keeps only those that still hold an
- * existing frame and have changed. A variable that tracks the display
- * changes with every photo; counters, settings and "last shot taken" do
- * not. When one address has changed at least twice and no other has, it
- * is kept in ML/SE.PLY and the toggle works from then on.
+ * Each SET in playback, while the address is unknown, is one step. The
+ * first press must be on the NEWEST photo (Play opens there): it scans
+ * Canon's low memory for 32-bit words holding exactly that frame, either
+ * as the plain number (8669) or packed as on the 60D (108 << 16 | 8669).
+ * Every later press, on an older photo, keeps only those that still hold
+ * a frame that exists in the folder and have changed. A variable that
+ * tracks the display changes with every photo; counters, settings and
+ * "last shot taken" do not. When one address has changed at least twice
+ * and no other has, it is kept in ML/SE.PLY and the toggle works from
+ * then on.
+ *
+ * Why the newest photo: on the camera this was first tried on, the folder
+ * also held 528 photos from another camera (DSCF8101 to DSCF8628), so
+ * "any frame in the folder" matched hundreds of unrelated words (0x2000
+ * is frame 8192) and filled the list before the real one was reached.
+ * One exact number matches a handful.
  *
  * The module's own memory and the current task's stack hold copies of the
  * same values (they change with every photo too), so both are left out
@@ -616,7 +634,7 @@ static int soup_folder_now(void)
 
 typedef struct { uint32_t addr, val; uint8_t packed, changes; } play_cand;
 static play_cand pc[PLAY_CAND];
-static int       pc_n, pc_presses, pc_folder = -1;
+static int       pc_n, pc_presses, pc_folder = -1, pc_frames;
 static uint8_t   play_bits[(9999 + 8) / 8];
 static uint32_t  play_addr;             /* learned, 0 = not yet               */
 static int       play_packed;
@@ -684,17 +702,25 @@ static void play_log_cands(const char *what)
  * the screen; returns 1 once the address is learned. */
 int soup_play_learn(char *msg, int msglen)
 {
-    int folder = soup_folder_now(), i, best = -1, nbest = 0, top = 0;
+    struct card_info *card = get_shooting_card();
+    int folder, newest, i, best = -1, nbest = 0, top = 0;
     volatile uint32_t *p;
     uint32_t mod_lo, mod_hi, stk_lo, stk_hi;
 
-    if (!soup_is_5d2_212() || folder < 100) {
+    /* Find the folder really on the card first: until a frame has been
+     * developed since power-on, soup_dcim is still empty and Magic
+     * Lantern's guess (108EOS5D) lists no photos at all. */
+    newest = card ? card->file_number : 0;
+    if (card) soup_dcim_refresh(card->folder_number, newest);
+    folder = soup_folder_now();
+
+    if (!soup_is_5d2_212() || folder < 100 || newest < 1 || newest > 9999) {
         snprintf(msg, msglen, " FILM: CAN'T TELL WHICH PHOTO THIS IS ");
         return 0;
     }
-    if (folder != pc_folder) {
+    if (folder != pc_folder || pc_presses == 0) {
         memset(play_bits, 0, sizeof(play_bits));
-        soup_list_frames(play_bits);
+        pc_frames = soup_list_frames(play_bits);
         pc_folder = folder;
         pc_n = pc_presses = 0;
     }
@@ -703,20 +729,31 @@ int soup_play_learn(char *msg, int msglen)
     stk_lo = (uint32_t)&i - 0x10000;  stk_hi = (uint32_t)&i + 0x10000;
 
     if (pc_presses == 0) {
-        for (p = (volatile uint32_t *)PLAY_LO; (uint32_t)p < PLAY_HI && pc_n < PLAY_CAND; p++) {
+        uint32_t want_plain = (uint32_t)newest;
+        uint32_t want_packed = ((uint32_t)folder << 16) | (uint32_t)newest;
+        int found = 0;
+        for (p = (volatile uint32_t *)PLAY_LO; (uint32_t)p < PLAY_HI; p++) {
             uint32_t a = (uint32_t)p, v;
             if ((a >= mod_lo && a < mod_hi) || (a >= stk_lo && a < stk_hi)) continue;
             v = *p;
-            if (play_value_ok(v, 1, folder) || play_value_ok(v, 0, folder)) {
+            if (v != want_plain && v != want_packed) continue;
+            found++;
+            if (pc_n < PLAY_CAND) {
                 pc[pc_n].addr = a; pc[pc_n].val = v;
-                pc[pc_n].packed = (uint8_t)play_value_ok(v, 1, folder);
+                pc[pc_n].packed = (uint8_t)(v == want_packed);
                 pc[pc_n].changes = 0;
                 pc_n++;
             }
         }
+        soup_log("playback learn: folder %s, %d photos, newest %04d, %d words hold it",
+                 soup_dcim_dir(), pc_frames, newest, found);
+        if (pc_n == 0) {
+            snprintf(msg, msglen, " FILM: START ON YOUR NEWEST PHOTO ");
+            return 0;
+        }
         pc_presses = 1;
         play_log_cands("start");
-        snprintf(msg, msglen, " FILM: LEARNING 1 - NEXT PHOTO, THEN SET ");
+        snprintf(msg, msglen, " FILM: LEARNING 1 - OLDER PHOTO, THEN SET ");
         return 0;
     }
 
@@ -755,13 +792,16 @@ int soup_play_learn(char *msg, int msglen)
         snprintf(msg, msglen, " FILM: LEARNED ");
         return 1;
     }
-    if (pc_n == 0 || pc_presses >= PLAY_PRESSES) {
+    /* nothing moved in two steps back: the first press was not on the
+     * newest photo, or this camera keeps it some other way */
+    if (pc_n == 0 || pc_presses >= PLAY_PRESSES || (pc_presses >= 3 && top == 0)) {
         soup_log("playback learn: no single answer after %d presses, see the lines above", pc_presses);
         pc_n = pc_presses = 0;
-        snprintf(msg, msglen, " FILM: COULDN'T LEARN - SEE ML/LOGS/SOUP.LOG ");
+        snprintf(msg, msglen, top == 0 ? " FILM: COULDN'T LEARN - START ON NEWEST PHOTO "
+                                       : " FILM: COULDN'T LEARN - SEE ML/LOGS/SOUP.LOG ");
         return 0;
     }
-    snprintf(msg, msglen, " FILM: LEARNING %d - NEXT PHOTO, THEN SET ", pc_presses);
+    snprintf(msg, msglen, " FILM: LEARNING %d - OLDER PHOTO, THEN SET ", pc_presses);
     return 0;
 }
 
@@ -1464,6 +1504,7 @@ static unsigned int soup_init(void)
     struct menu_entry *stock_entry;
 
     film_sem = create_named_semaphore("soup_film", 1);
+    dcim_sem = create_named_semaphore("soup_dcim", 1);
     soup_read_index();
     {
         int i;

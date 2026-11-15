@@ -52,7 +52,7 @@ FILM/100CANON/FLM_1234.JPG    the same photo with the look on it
 | | |
 |:--|:--|
 | Module source | adapted from the 60D module, see [What changed from the 60D port](#-what-changed-from-the-60d-port) |
-| Builds against ML `5D2.212` | yes: `soup.mo` 122,688 bytes (about 116 KB resident; the 115 KB build started on the camera with no Err 70); all 96 functions it imports are exported by `5D2.212`; relocations only `R_ARM_ABS32` / `R_ARM_CALL` / `R_ARM_JUMP24`; no `%c` in its strings |
+| Builds against ML `5D2.212` | yes: `soup.mo` 123,128 bytes (about 116 KB resident; the 115 KB build started on the camera with no Err 70); all 96 functions it imports are exported by `5D2.212`; relocations only `R_ARM_ABS32` / `R_ARM_CALL` / `R_ARM_JUMP24`; no `%c` in its strings |
 | Loads on a 5D Mark II | yes, first try (2026-11-15): reads all 21 stocks, finds the CF card as `A:`. Nothing was developed then: Film was left OFF, and the card's folder was `108_FUJI`, which the module couldn't find (fixed since, see below) |
 | Finds the real DCIM folder | yes: `dcim_test.c` passes 16 checks, and on the camera the module found `A:/DCIM/108_FUJI` where Magic Lantern said `108EOS5D` |
 | Develops on a desktop | yes: the module's own `soup_dev.c` (`host_test.c`) on a synthetic 5616×3744 "Canon EOS 5D Mark II" CR2 gives a 2800×1872 film JPEG with Velvia, Portra, Acros and Soup 800; peak memory about 1.5 MB, nothing leaked |
@@ -62,12 +62,12 @@ FILM/100CANON/FLM_1234.JPG    the same photo with the look on it
 | Develop older photos | added: LAST 1 / 5 / 20 or the whole folder, skip or replace existing film versions; no auto power-off while developing. Builds clean; filename parsing tested on a PC (`dcim_test.c`). **Not yet tried on the camera** |
 | 36 films | yes: 15 added from the 7D and 6D ports; the camera lists all 36 (`36 stocks` in `SOUP.LOG`) and developed Ektar 100 at HALF and FULL |
 | Size FULL (5616×3744) | yes (2026-11-15): a JPEG L became a 5616×3744, quality 95, 7.8 MB film JPEG (Canon's own JPEG L of the frame: 10.2 MB) in **121 s**, Ektar 100. The frame before, at HALF: **42 s** |
-| RAW+JPEG source | added: the camera's JPEG L is used when it is at least as large as the CR2's preview, the CR2 otherwise; tested on a PC. Not yet tried on the camera |
-| Film-tinted thumbnails | added: film files now carry a thumbnail in the film's look (before, they had none: Canon's 9.9 KB thumbnail didn't fit the 8 KB EXIF block). Tested on a PC; main image byte-for-byte unchanged |
-| Film sets ISO | on the camera: Portra 160 set ISO 160. The picker card showed FILM SPEED 400 for it (its own, older table); both now use `speed.h`. Rest of the test pending |
-| Favourite films | added: INFO in the picker. Not yet tried on the camera |
-| Playback toggle (SET in playback) | added, **experimental**: the camera learns where Canon keeps the photo on screen over three or more SET presses in playback. Not yet tried on the camera |
-| Picker on the 4:3 screen | drawn 8/9 as tall to undo the 4:3 panel's squeeze (previewed on a PC). Not yet seen on the camera |
+| RAW+JPEG source | yes: RAW + L was developed from the `.JPG` (41 s), RAW + S from the `.CR2` (32 s), both 2800×1872 |
+| Film-tinted thumbnails | yes: the camera's film files carry a 160×120 thumbnail in the film's look (before, they had none: Canon's thumbnail didn't fit the 8 KB EXIF block). Main image byte-for-byte unchanged (PC) |
+| Film sets ISO | yes: Tri-X 400 → 400, Portra 160 → 160, Portra 800 → 800, Vision3 250D → 250, Kodachrome 64 → 100; an ISO set by hand stays; OFF leaves ISO alone. The picker card used to show FILM SPEED 400 for Portra 160 (its own, older table); both now use `speed.h` |
+| Favourite films | yes: INFO marks and unmarks (`* NAME`), favourites come first and stay first after a restart |
+| Playback toggle (SET in playback) | added, **experimental**: the camera learns where Canon keeps the photo on screen over three or more SET presses in playback. First tries on the camera failed (the folder wasn't found yet after power-on, and 528 photos from another camera in the folder filled the list with look-alikes); now it starts from the newest photo's exact number. Fixed version not yet tried |
+| Picker on the 4:3 screen | yes: drawn 8/9 as tall to undo the 4:3 panel's squeeze; looks right on the camera |
 
 <br>
 
@@ -190,16 +190,18 @@ In **Play**, with a photo on screen, press **SET**. The first time, the
 camera has to learn where Canon keeps "the photo on screen", which is
 different on every body:
 
-1. **SET** on a photo: `FILM: LEARNING 1 - NEXT PHOTO, THEN SET`
-2. go to **another photo**, **SET** again, and once more on a third
+1. press **Play**: it opens on your **newest** photo. **SET** there:
+   `FILM: LEARNING 1 - OLDER PHOTO, THEN SET`
+2. **◀** to the photo before it, **SET** again; then once more on the one
+   before that
 3. when it is sure: `FILM: LEARNED`, and the film version appears
 
 From then on **SET** shows the film version and **SET** again Canon's
 original, as on the 60D. What it learned is kept in `ML/SE.PLY`; delete
-that file to make it learn again. Use photos taken in the current folder,
-and a different photo for each press. If it says `COULDN'T LEARN`, send
-`ML/LOGS/SOUP.LOG`: every step is logged, so the address can be picked
-from it by hand.
+that file to make it learn again. The first press must be on the newest
+photo (`START ON YOUR NEWEST PHOTO` otherwise), and each press on a
+different one. If it says `COULDN'T LEARN`, send `ML/LOGS/SOUP.LOG`:
+every step is logged, so the address can be picked from it by hand.
 
 ### Developing older photos
 
@@ -324,8 +326,8 @@ stay where they are. If the camera ever hangs, take the battery out.
 - **Firmware 2.1.2 only**, because that's the only firmware Magic Lantern
   supports on the 5D Mark II.
 - **The playback toggle learns its address on the camera.** It looks for
-  a value in Canon's memory that matches a photo in the folder and changes
-  with every photo you show; the 60D's two addresses, found in
+  a value in Canon's memory that holds the newest photo's number, then
+  keeps the one that follows you to older photos; the 60D's two addresses, found in
   [qemu-eos](https://github.com/reticulatedpines/qemu-eos), don't apply to
   the 5D Mark II. It reads memory only. A wrong guess would show the wrong
   film version (any key puts Canon's picture back): delete `ML/SE.PLY` and
