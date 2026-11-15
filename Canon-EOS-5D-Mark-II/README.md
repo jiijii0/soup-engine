@@ -51,9 +51,10 @@ FILM/100CANON/FLM_1234.JPG    the same photo with the look on it
 | | |
 |:--|:--|
 | Module source | adapted from the 60D module, see [What changed from the 60D port](#-what-changed-from-the-60d-port) |
-| Builds against ML `5D2.212` | yes: `soup.mo` 101,372 bytes; all 79 functions it imports are exported by `5D2.212`; relocations only `R_ARM_ABS32` / `R_ARM_CALL` / `R_ARM_JUMP24`; no `%c` in its strings |
+| Builds against ML `5D2.212` | yes: `soup.mo` 103,332 bytes; all 84 functions it imports are exported by `5D2.212`; relocations only `R_ARM_ABS32` / `R_ARM_CALL` / `R_ARM_JUMP24`; no `%c` in its strings |
+| Loads on a 5D Mark II | yes, first try (2026-11-15): reads all 21 stocks, finds the CF card as `A:`. Nothing was developed then: Film was left OFF, and the card's folder was `108_FUJI`, which the module couldn't find (fixed since, see below) |
+| Finds the real DCIM folder | fixed after that first try; `dcim_test.c` passes 16 checks, including that card. Not yet run on the camera |
 | Develops on a desktop | yes: the module's own `soup_dev.c` (`host_test.c`) on a synthetic 5616×3744 "Canon EOS 5D Mark II" CR2 gives a 2800×1872 film JPEG with Velvia, Portra, Acros and Soup 800; peak memory about 1.5 MB, nothing leaked |
-| Loads on a 5D Mark II | not yet tried |
 | Develops a frame on the camera | not yet tried |
 | Playback toggle (SET in playback) | **off**: needs the 5D2's playback addresses, see below |
 | Picker on the 4:3 screen | expected to work, about 11% narrower than drawn |
@@ -202,6 +203,12 @@ stay where they are. If the camera ever hangs, take the battery out.
 
 ## ⚠️ Known limits
 
+- **Photos in a folder another camera made** (say `DCIM/108_FUJI` on a
+  card that was in a Fujifilm) are found: the module lists `DCIM` and
+  uses the folder with the current number that holds your latest shot.
+  The film files mirror its name, `FILM/108_FUJI/`. If a frame really
+  can't be found, `ML/LOGS/SOUP.LOG` says `nnnn: no CR2 or JPG in ...,
+  skipped`.
 - **Firmware 2.1.2 only**, because that's the only firmware Magic Lantern
   supports on the 5D Mark II.
 - **The playback toggle is off.** On the 60D, SET in playback swaps the
@@ -228,6 +235,7 @@ stay where they are. If the camera ever hangs, take the battery out.
 |:--|:--|
 | `src/ml/60d/` → `src/ml/5d2/` | renamed |
 | `src/ml/5d2/soup.c` | playback-photo lookup gated on the 5D Mark II and firmware 2.1.2, with its two addresses left empty (the 60D's are never read); fallback drive `A:` for the CF card; sizes in comments |
+| `src/ml/5d2/soup.c`, `soup_dcim.h`, `dcim_test.c` | finds the DCIM folder really on the card instead of Magic Lantern's guess (number + `EOS5D`), so a folder another camera made, like `108_FUJI`, works; logs any frame it skips. Tested by `dcim_test.c` |
 | `src/ml/5d2/soup_ui.c` | the playback log line no longer reads the 60D's addresses; notes on SET (C.Fn IV-3) and the 4:3 screen |
 | `src/ml/5d2/soup_dev.c` | EXIF model fallback is `Canon EOS 5D Mark II` |
 | `src/ml/5d2/ML-PIN.txt`, `Makefile`, `README.rst` | 5D2.212 |

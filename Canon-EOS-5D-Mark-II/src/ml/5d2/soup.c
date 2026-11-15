@@ -53,6 +53,7 @@
 #include "jpeg_enc.h"
 #include "soup_dev.h"
 #include "soup_ui.h"
+#include "soup_dcim.h"
 
 extern int ml_started;
 
@@ -331,10 +332,101 @@ static void soup_progress_cb(void *ctx, const char *stage, int percent)
  * Canon's playback indexes everything in DCIM at power-on, and extra
  * JPEGs it didn't write there gave "No Image". Soup's own playback
  * toggle shows them instead.
+ *
+ * The camera folder is the one really on the card (soup_dcim_refresh),
+ * not get_dcim_dir()'s guess: DCIM/108_FUJI mirrors to FILM/108_FUJI.
  */
+
+/* "A:" (or whatever drive get_dcim_dir() names) into `drive`. */
+static void soup_drive(char *drive, int n)
+{
+    /* no "%.*s": DryOS's snprintf is not to be trusted with it */
+    const char *dir = get_dcim_dir();          /* "A:/DCIM/100CANON" */
+    const char *sub = strstr(dir, "/DCIM/");
+    int k = sub ? (int)(sub - dir) : 0;
+    if (k > 0 && k < n) { memcpy(drive, dir, k); drive[k] = 0; }
+    else soup_copy(drive, n, "A:");
+}
+
+/*
+ * The DCIM folder the camera is really writing to (see soup_dcim.h for
+ * why get_dcim_dir() can be wrong). Looked up only by the develop task,
+ * only when it has a frame to develop, and listed again only when the
+ * folder number changes, or (at most every 10 s) when the folder found
+ * before is gone (card swapped). Everyone else reads the copy.
+ */
+#define DCIM_MAX 24
+static char soup_dcim[FILM_PATH];      /* "A:/DCIM/108_FUJI"; "" = not yet */
+static int  soup_dcim_folder = -1;
+static int  soup_dcim_ms;
+
+static int soup_dcim_has_frame(void *ctx, const char *name)
+{
+    int num = *(const int *)ctx;
+    char drive[8], p[FILM_PATH];
+    soup_drive(drive, sizeof(drive));
+    snprintf(p, sizeof(p), "%s/DCIM/%s/%s%04d.CR2", drive, name, get_file_prefix(), num);
+    if (is_file(p)) return 1;
+    snprintf(p, sizeof(p), "%s/DCIM/%s/%s%04d.JPG", drive, name, get_file_prefix(), num);
+    return is_file(p);
+}
+
+static void soup_dcim_refresh(int folder, int num)
+{
+    char names[DCIM_MAX][16];
+    const char *ptrs[DCIM_MAX];
+    char drive[8], top[16], was[FILM_PATH];
+    struct fio_file *f;
+    struct fio_dirent *d;
+    int count = 0, pick, now = get_ms_clock();
+
+    if (folder == soup_dcim_folder && soup_dcim[0]) {
+        if (is_dir(soup_dcim)) return;
+        if (now - soup_dcim_ms < 10000) return;
+    }
+    soup_dcim_ms = now;
+    soup_copy(was, sizeof(was), soup_dcim);
+    soup_drive(drive, sizeof(drive));
+    snprintf(top, sizeof(top), "%s/DCIM/", drive);
+
+    f = alloc_fio_file();
+    if (!f) return;
+    d = FIO_FindFirstEx(top, f);
+    if (!IS_ERROR(d)) {
+        do {
+            struct file_info fi = convert_fio_file_info(f);
+            if (!(fi.mode & ATTR_DIRECTORY) || !fi.name[0] || fi.name[0] == '.') continue;
+            if (count < DCIM_MAX) {
+                soup_copy(names[count], sizeof(names[count]), fi.name);
+                ptrs[count] = names[count];
+                count++;
+            }
+        } while (FIO_FindNextEx(d, f) == 0);
+        FIO_FindClose(d);
+    }
+    free(f);
+
+    pick = soup_dcim_pick(ptrs, count, folder, get_dcim_dir_suffix(),
+                          soup_dcim_has_frame, &num);
+    if (pick >= 0)
+        snprintf(soup_dcim, sizeof(soup_dcim), "%s/DCIM/%s", drive, names[pick]);
+    else
+        soup_copy(soup_dcim, sizeof(soup_dcim), get_dcim_dir());
+    soup_dcim_folder = folder;
+    if (strcmp(was, soup_dcim) != 0)
+        soup_log("camera folder %s (%d in DCIM; Magic Lantern says %s)",
+                 soup_dcim, count, get_dcim_dir());
+}
+
+/* The camera folder: the one found on the card, else ML's guess. */
+static const char *soup_dcim_dir(void)
+{
+    return soup_dcim[0] ? soup_dcim : get_dcim_dir();
+}
+
 static void soup_film_dir(char *out, int n)
 {
-    const char *dir = get_dcim_dir();          /* "A:/DCIM/100CANON" */
+    const char *dir = soup_dcim_dir();         /* "A:/DCIM/108_FUJI" */
     const char *sub = strstr(dir, "/DCIM/");
     if (sub) {
         int k = (int)(sub - dir);
@@ -402,19 +494,19 @@ int soup_play_current(int *folder, int *num)
 
 void soup_flm_path_in(int folder, int num, char *out, int n)
 {
-    /* no "%.*s": DryOS's snprintf is not to be trusted with it */
-    const char *dir = get_dcim_dir();          /* "A:/DCIM/100CANON" */
-    const char *sub = strstr(dir, "/DCIM/");
-    char drive[8] = "A:";
-    int k = sub ? (int)(sub - dir) : 0;
-    if (k > 0 && k < (int)sizeof(drive)) { memcpy(drive, dir, k); drive[k] = 0; }
-    snprintf(out, n, "%s/FILM/%03d%s/FLM_%04d.JPG", drive, folder,
-             get_dcim_dir_suffix(), num);
+    char drive[8];
+    const char *sub = strstr(soup_dcim, "/DCIM/");
+    soup_drive(drive, sizeof(drive));
+    if (folder == soup_dcim_folder && sub)     /* the folder found on the card */
+        snprintf(out, n, "%s/FILM/%s/FLM_%04d.JPG", drive, sub + 6, num);
+    else
+        snprintf(out, n, "%s/FILM/%03d%s/FLM_%04d.JPG", drive, folder,
+                 get_dcim_dir_suffix(), num);
 }
 
 static void soup_paths(int num, char *cr2, char *jpg, char *flm, char *tmp, int n)
 {
-    const char *dir = get_dcim_dir();
+    const char *dir = soup_dcim_dir();
     const char *prefix = get_file_prefix();
     char fdir[FILM_PATH];
     soup_film_dir(fdir, sizeof(fdir));
@@ -494,8 +586,10 @@ static int soup_one(int num, int current)
         src = jpg; is_cr2 = 0;
     } else {
         /* Nothing with this number (deleted, or a gap): move on once a
-         * later frame exists. */
+         * later frame exists. Say so: a wrong folder looked exactly like
+         * this, and skipped every frame without a word. */
         if (is_file(tmp)) FIO_RemoveFile(tmp);
+        if (num < current) soup_log("%04d: no CR2 or JPG in %s, skipped", num, soup_dcim_dir());
         return num < current ? 1 : 0;
     }
 
@@ -578,7 +672,7 @@ static void soup_task(void *unused)
     msleep(3000);                    /* let the camera finish booting */
     {
         struct card_info *c = get_shooting_card();
-        soup_log("soup.mo started, %d stocks, film %s, file number %d, dir %s",
+        soup_log("soup.mo started, %d stocks, film %s, file number %d, ML dir %s",
                  film_count, film_on ? "ON" : "OFF", c ? c->file_number : -1, get_dcim_dir());
     }
 
@@ -629,6 +723,9 @@ static void soup_task(void *unused)
         if (film_batch_done + (current - cursor) > film_batch_total)
             film_batch_total = film_batch_done + (current - cursor);
 
+        /* which DCIM folder the frames are really in (cheap after the
+         * first time; lists DCIM only when the folder number changes) */
+        soup_dcim_refresh(card->folder_number, current);
         rc = soup_one(cursor + 1, current);
         if (rc > 0) {
             cursor++;

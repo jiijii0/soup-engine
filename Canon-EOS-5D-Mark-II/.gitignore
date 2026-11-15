@@ -6,3 +6,4 @@ ROM*.BIN
 *.o
 *.d
 host_test
+dcim_test

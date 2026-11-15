@@ -57,8 +57,19 @@ cc -O2 -std=gnu99 -DSOUP_HOST -I$E -I$M -o host_test $M/host_test.c $M/soup_dev.
 ./host_test IMG_1234.CR2 src/stocks/velvia.fs out.jpg
 ```
 
+`ml/5d2/dcim_test.c` checks how the module picks the DCIM folder the
+camera is really writing to (`soup_dcim.h`), including a card whose folder
+another camera made (`108_FUJI`):
+
+```sh
+cc -std=gnu99 -o dcim_test src/ml/5d2/dcim_test.c && ./dcim_test
+```
+
 ## Emulator
 
-The port was also tested in [qemu-eos](https://github.com/reticulatedpines/qemu-eos),
-which needs your own camera's ROM dump. **Never commit `ROM0.BIN` or
+The 60D port was also tested in [qemu-eos](https://github.com/reticulatedpines/qemu-eos);
+this one hasn't been yet. It is also how the 5D Mark II's playback
+addresses can be found (see `soup_play_current()` in `ml/5d2/soup.c`).
+qemu-eos needs your own camera's ROM dump: Magic Lantern writes it to
+`ML/LOGS/ROM0.BIN` and `ROM1.BIN` on the card. **Never commit `ROM0.BIN` or
 `ROM1.BIN`:** they are Canon's firmware (`.gitignore` blocks them).
