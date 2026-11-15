@@ -1,7 +1,7 @@
 /*
  * host_test.c - run soup_dev.c on the desktop.
  *
- *   host_test <in.CR2|in.JPG> <stock.fs|-> <out.jpg>
+ *   host_test <in.CR2|in.JPG> <stock.fs|-> <out.jpg> [half|full]
  *
  * The same soup_dev.c the camera runs, over stdio. Reports time, the
  * output size and the peak memory the develop asked for, which is what has
@@ -51,10 +51,13 @@ int main(int argc, char **argv)
     clock_t t0;
     int rc;
 
-    if (argc != 4) {
-        fprintf(stderr, "usage: host_test <in.CR2|in.JPG> <stock.fs|-> <out.jpg>\n");
+    int scale = FILM_SCALE_HALF, quality = FILM_QUALITY_HALF;
+
+    if (argc != 4 && argc != 5) {
+        fprintf(stderr, "usage: host_test <in.CR2|in.JPG> <stock.fs|-> <out.jpg> [half|full]\n");
         return 2;
     }
+    if (argc == 5 && !strcmp(argv[4], "full")) { scale = FILM_SCALE_FULL; quality = FILM_QUALITY_FULL; }
     se_stock_init(&st);
     if (strcmp(argv[2], "-")) {
         static char text[16384];
@@ -69,7 +72,7 @@ int main(int argc, char **argv)
     }
 
     t0 = clock();
-    rc = soup_develop(argv[1], ends_ci(argv[1], ".CR2"), argv[3], &st, progress);
+    rc = soup_develop(argv[1], ends_ci(argv[1], ".CR2"), argv[3], &st, scale, quality, progress);
     printf("%s via %s: rc=%d (%s), %.2fs host CPU, peak alloc %zu KB, leaked %zu bytes\n",
            argv[1], st.name, rc, se_strerror(rc),
            (double)(clock() - t0) / CLOCKS_PER_SEC, soup_host_peak >> 10, soup_host_live);

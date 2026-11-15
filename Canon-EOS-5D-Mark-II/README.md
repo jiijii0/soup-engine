@@ -50,13 +50,14 @@ FILM/100CANON/FLM_1234.JPG    the same photo with the look on it
 | | |
 |:--|:--|
 | Module source | adapted from the 60D module, see [What changed from the 60D port](#-what-changed-from-the-60d-port) |
-| Builds against ML `5D2.212` | yes: `soup.mo` 107,244 bytes; all 84 functions it imports are exported by `5D2.212`; relocations only `R_ARM_ABS32` / `R_ARM_CALL` / `R_ARM_JUMP24`; no `%c` in its strings |
+| Builds against ML `5D2.212` | yes: `soup.mo` 108,412 bytes; all 86 functions it imports are exported by `5D2.212`; relocations only `R_ARM_ABS32` / `R_ARM_CALL` / `R_ARM_JUMP24`; no `%c` in its strings |
 | Loads on a 5D Mark II | yes, first try (2026-11-15): reads all 21 stocks, finds the CF card as `A:`. Nothing was developed then: Film was left OFF, and the card's folder was `108_FUJI`, which the module couldn't find (fixed since, see below) |
 | Finds the real DCIM folder | yes: `dcim_test.c` passes 16 checks, and on the camera the module found `A:/DCIM/108_FUJI` where Magic Lantern said `108EOS5D` |
 | Develops on a desktop | yes: the module's own `soup_dev.c` (`host_test.c`) on a synthetic 5616×3744 "Canon EOS 5D Mark II" CR2 gives a 2800×1872 film JPEG with Velvia, Portra, Acros and Soup 800; peak memory about 1.5 MB, nothing leaked |
 | Develops a frame on the camera | yes (2026-11-15): a JPEG L shot (5616×3744, 8.2 MB) became `FILM/108_FUJI/FLM_8661.JPG`, 2800×1872, 701 KB, Classic Chrome, in **68 s**, EXIF model and stock name correct. RAW and RAW+JPEG not tried yet |
 | Faster engine | the 7D port's decoder, encoder and look code (see below): byte-identical output on all 21 stocks. On the camera: **45–46 s** a JPEG L frame, Classic Chrome (was 68 s) |
 | Card reads | the source is now read 256 KB at a time (34 card reads for a JPEG L, was about 1,000 of 8 KB), same bytes out. `SOUP.LOG` gives the card's share of each develop (`card: read N ms ...`). Not yet timed on the camera |
+| Size FULL (5616×3744) | added; on a PC every stock develops at full size, quality 95, 4.9–7.1 MB a file, about 2–2.5 MB of memory, about 3× HALF's time. **Not yet tried on the camera** |
 | Playback toggle (SET in playback) | **off**: needs the 5D2's playback addresses, see below |
 | Picker on the 4:3 screen | expected to work, about 11% narrower than drawn |
 
@@ -73,6 +74,8 @@ Everything the 60D port does, on the 5D Mark II:
 - **A small progress badge** on the shooting screen while frames develop.
 - **RAW, RAW+JPEG and JPEG-only.** From a CR2 it develops the full-size
   JPEG Canon embeds in it (5616×3744), at half size: 2800×1872 (half is 2808 wide; the JPEG encoder trims to a multiple of 16).
+- **Or at full size**, 5616×3744 like Canon's JPEG L, at JPEG quality 95:
+  set **Size** to **FULL**. It takes a few minutes a frame.
 - **Only shots taken while Film is on are developed.** Photos already on
   the card are left alone.
 - **Film files live outside DCIM**, so Canon's playback is never confused
@@ -135,7 +138,17 @@ Lantern's menu: **Shoot → Soup Film**, then SET.
 | Picker | **half-press** | close and shoot |
 
 The same settings are in the Magic Lantern menu under **Shoot → Soup
-Film**: Film on/off, Stock, and a Status line.
+Film** (press **Picture Style** on it to open them): Film on/off, Stock,
+**Size** and a Status line.
+
+| Size | film JPEG | quality | time a frame |
+|:--|:--|:--|:--|
+| **HALF** (default) | 2800×1872 | 88 | about 45 s |
+| **FULL** | 5616×3744, the size of Canon's JPEG L | 95 | a few minutes (not yet timed) |
+
+FULL uses a bigger memory budget for the glow, so every stock looks the
+same as at HALF, only larger. Leave the camera on until the badge says
+**FILM DONE**, and expect files of 5–7 MB.
 
 While a frame develops, a badge at the top right of the shooting screen
 shows progress (**+2** means two more frames are waiting), then **FILM
@@ -146,7 +159,7 @@ DONE** or **FILM FAILED** for a moment.
 | File | What it is |
 | --- | --- |
 | `DCIM/100CANON/IMG_1234.CR2` / `.JPG` | your photo, never changed |
-| `FILM/100CANON/FLM_1234.JPG` | the film version: 2800×1872 from a full-size shot, half size from smaller ones |
+| `FILM/100CANON/FLM_1234.JPG` | the film version: 2800×1872 from a full-size shot at HALF, 5616×3744 at FULL; smaller shots give smaller files |
 | `ML/SE.CFG` | Film on/off and the chosen stock |
 | `ML/SE.NXT` | where Soup got to, so it can catch up after a restart |
 | `ML/LOGS/SOUP.LOG` | one line per develop, with the stock used |
@@ -204,6 +217,11 @@ stay where they are. If the camera ever hangs, take the battery out.
 
 ## ⚠️ Known limits
 
+- **FULL hasn't run on a 5D Mark II yet.** It needs about 2–2.5 MB of
+  memory while a frame develops. If the camera can't spare it the frame
+  fails cleanly and `ML/LOGS/SOUP.LOG` says how much memory was free. (On
+  the 6D port, the camera restarted once during a first full-size
+  develop.) Shooting while a FULL frame develops makes both slower.
 - **Photos in a folder another camera made** (say `DCIM/108_FUJI` on a
   card that was in a Fujifilm) are found: the module lists `DCIM` and
   uses the folder with the current number that holds your latest shot.
@@ -238,6 +256,7 @@ stay where they are. If the camera ever hangs, take the battery out.
 | `src/ml/5d2/soup.c` | playback-photo lookup gated on the 5D Mark II and firmware 2.1.2, with its two addresses left empty (the 60D's are never read); fallback drive `A:` for the CF card; sizes in comments |
 | `src/ml/5d2/soup.c`, `soup_dcim.h`, `dcim_test.c` | finds the DCIM folder really on the card instead of Magic Lantern's guess (number + `EOS5D`), so a folder another camera made, like `108_FUJI`, works; logs any frame it skips. Tested by `dcim_test.c` |
 | `src/ml/5d2/soup_dev.c`, `soup_port.h` | the source JPEG is read through a 256 KB read-ahead instead of a seek and read per 8 KB; each develop logs the time spent reading and writing the card |
+| `src/ml/5d2/soup.c`, `soup_dev.c`, `soup_dev.h`, `host_test.c` | Size HALF / FULL (saved in `ML/SE.CFG` as `SIZE`); FULL decodes at full scale, quality 95, with a 1 MB look budget so no stock's glow is cut, and 768 KB scratch for 4:2:0 previews; a develop that runs out of memory logs how much was free; the help line names Picture Style, the 5D2's submenu button |
 | `src/ml/5d2/soup_ui.c` | the playback log line no longer reads the 60D's addresses; notes on SET (C.Fn IV-3) and the 4:3 screen |
 | `src/ml/5d2/soup_dev.c` | EXIF model fallback is `Canon EOS 5D Mark II` |
 | `src/ml/5d2/ML-PIN.txt`, `Makefile`, `README.rst` | 5D2.212 |

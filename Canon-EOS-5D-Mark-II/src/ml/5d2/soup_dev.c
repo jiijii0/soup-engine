@@ -255,9 +255,10 @@ static int soup_cr2_thumb(const uint8_t *hdr, int got, uint32_t *off, uint32_t *
  * result is written to `tmp`; the caller renames it into place.
  */
 int soup_develop(const char *src, int is_cr2, const char *tmp,
-                 const se_stock *stock, se_progress_fn progress)
+                 const se_stock *stock, int scale, int quality,
+                 se_progress_fn progress)
 {
-    uint8_t *hdr = 0, *dma = 0, *block = 0, *thumb = 0;
+    uint8_t *hdr = 0, *dma = 0, *block = 0, *lookmem = 0, *thumb = 0;
     se_arena arena, lookar;
     se_look lk;
     se_cr2_info info;
@@ -268,7 +269,7 @@ int soup_develop(const char *src, int is_cr2, const char *tmp,
     soup_look L;
     soup_out out;
     FILE *h = 0;
-    size_t lookneed;
+    size_t lookneed, scratch;
     uint32_t poff = 0, plen = 0, toff = 0, tlen = 0, fsize = 0;
     int pw = 0, ph = 0, ow, oh, got = 0, stream;
     se_err rc = SE_E_IO;
@@ -277,6 +278,8 @@ int soup_develop(const char *src, int is_cr2, const char *tmp,
     memset(&L, 0, sizeof L);
     memset(&info, 0, sizeof info);
     soup_rd_ms = soup_rd_calls = soup_wr_ms = soup_wr_calls = 0;
+    if (scale != FILM_SCALE_FULL) scale = FILM_SCALE_HALF;
+    if (quality < 50 || quality > 98) quality = FILM_QUALITY_HALF;
 
     /* --- find the JPEG to develop ------------------------------------- */
     if (FIO_GetFileSize(src, &fsize) != 0 || fsize == 0) return SE_E_IO;
@@ -341,19 +344,36 @@ int soup_develop(const char *src, int is_cr2, const char *tmp,
     }
 
     /* --- working memory ------------------------------------------------ */
-    se_jpeg_scaled_size(ji.width, ji.height, FILM_SCALE, &ow, &oh);
-    se_look_from_stock(stock, FILM_SCALE, &lk);
-    lookneed = se_look_fit(&lk, ow, FILM_LOOK_MAX);
+    se_jpeg_scaled_size(ji.width, ji.height, scale, &ow, &oh);
+    se_look_from_stock(stock, scale, &lk);
+    {
+        int r0 = lk.hal_radius, a0 = lk.hal_amount;
+        lookneed = se_look_fit(&lk, ow, scale == FILM_SCALE_FULL ? FILM_LOOK_MAX_FULL : FILM_LOOK_MAX);
+        if (a0 > 0 && lk.hal_amount == 0)
+            soup_log("%s: halation off at %d wide, does not fit", src, ow);
+        else if (lk.hal_radius != r0)
+            soup_log("%s: halation radius %d -> %d to fit", src, r0, lk.hal_radius);
+    }
 
-    block = malloc(FILM_SCRATCH + lookneed + 2 * FILM_OUTCHUNK + 64);
-    if (!block) {
+    /* Two allocations rather than one: at FULL the total is ~2 MB, and
+     * two pieces are easier for a fragmented heap to find. */
+    scratch = scale == FILM_SCALE_FULL ? FILM_SCRATCH_FULL : FILM_SCRATCH;
+    block = malloc(scratch + 2 * FILM_OUTCHUNK + 64);
+    lookmem = malloc(lookneed + 64);
+    if (!block || !lookmem) {
+#ifndef SOUP_HOST
+        soup_log("%s: no memory for working buffers (%d KB + %d KB; free: malloc %d KB, AllocateMemory %d KB)",
+                 src, (int)((scratch + 2 * FILM_OUTCHUNK) >> 10), (int)(lookneed >> 10),
+                 GetFreeMemForMalloc() >> 10, GetFreeMemForAllocateMemory() >> 10);
+#else
         soup_log("%s: no memory for working buffers", src);
+#endif
         rc = SE_E_NOMEM; goto done;
     }
     out.buf[0] = block;
     out.buf[1] = block + FILM_OUTCHUNK;
-    se_arena_init(&arena, block + 2 * FILM_OUTCHUNK, FILM_SCRATCH);
-    se_arena_init(&lookar, block + 2 * FILM_OUTCHUNK + FILM_SCRATCH, lookneed);
+    se_arena_init(&arena, block + 2 * FILM_OUTCHUNK, scratch);
+    se_arena_init(&lookar, lookmem, lookneed);
 
     enc = SE_NEW(&arena, se_jpeg, 1);
     if (!enc) { rc = SE_E_NOMEM; goto done; }
@@ -378,7 +398,7 @@ int soup_develop(const char *src, int is_cr2, const char *tmp,
     {
         uint8_t *strip = SE_NEW(&arena, uint8_t, (size_t)8 * ow * 3);
         if (!strip) { rc = SE_E_NOMEM; goto done; }
-        rc = se_jpeg_begin(enc, ow, oh, FILM_QUALITY, strip, &ex, soup_out_sink, &out);
+        rc = se_jpeg_begin(enc, ow, oh, quality, strip, &ex, soup_out_sink, &out);
         if (rc != SE_OK) goto done;
     }
     L.enc = enc;
@@ -389,10 +409,10 @@ int soup_develop(const char *src, int is_cr2, const char *tmp,
         memset(&sr, 0, sizeof sr);
         sr.h = h; sr.base = poff; sr.total = plen; sr.dma = dma; sr.dmacap = FILM_HDR;
         rc = se_jpeg_decode_stream_scaled(hdr + poff, (size_t)got - poff, plen,
-                                          soup_stream_read, &sr, FILM_SCALE,
+                                          soup_stream_read, &sr, scale,
                                           &arena, soup_rows, &L, &ji);
     } else {
-        rc = se_jpeg_decode_scaled(hdr, plen, FILM_SCALE, &arena, soup_rows, &L, &ji);
+        rc = se_jpeg_decode_scaled(hdr, plen, scale, &arena, soup_rows, &L, &ji);
     }
     if (rc == SE_OK && !L.err) rc = se_look_end(L.run, soup_emit, &L);
     if (rc == SE_OK && !L.err) rc = se_jpeg_end(enc);
@@ -400,8 +420,8 @@ int soup_develop(const char *src, int is_cr2, const char *tmp,
     if (rc == SE_OK && soup_out_flush(&out) != 0) rc = SE_E_IO;
     if (out.err) rc = SE_E_IO;
     if (rc == SE_OK)
-        soup_log("%s -> %dx%d, %d KB, %s, arena peak %d KB; card: read %d ms (%d reads), write %d ms (%d writes)",
-                 src, ow, oh, out.bytes >> 10, stream ? "streamed" : "whole",
+        soup_log("%s -> %dx%d q%d, %d KB, %s, arena peak %d KB; card: read %d ms (%d reads), write %d ms (%d writes)",
+                 src, ow & ~15, oh & ~7, quality, out.bytes >> 10, stream ? "streamed" : "whole",
                  (int)(arena.peak >> 10), soup_rd_ms, soup_rd_calls,
                  soup_wr_ms, soup_wr_calls);
     else
@@ -414,6 +434,7 @@ done:
     if (dma) fio_free(dma);
     if (hdr) free(hdr);
     if (block) free(block);
+    if (lookmem) free(lookmem);
     if (thumb) free(thumb);
     return rc;
 }

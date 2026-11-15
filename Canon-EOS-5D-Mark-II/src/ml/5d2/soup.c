@@ -74,13 +74,14 @@ extern int ml_started;
 
 static int film_on;                 /* menu: Film OFF/ON                 */
 static int film_stock;              /* menu: index into film_names       */
+static int film_size;               /* menu: 0 HALF, 1 FULL (JPEG L size) */
 static int film_count;
 static char film_names[FILM_MAX][FILM_NAME];
 static const char *film_choices[FILM_MAX];
 static char film_files[FILM_MAX][FILM_NAME];   /* .fs file per name       */
 static char film_descs[FILM_MAX][48];          /* DESC line, for the picker */
 
-static int film_saved_on = -1, film_saved_stock = -1;
+static int film_saved_on = -1, film_saved_stock = -1, film_saved_size = -1;
 static int film_started;            /* develop task is running           */
 
 /* status, shown in the menu */
@@ -250,6 +251,7 @@ static void soup_read_cfg(void)
         line0 = i + 1;
         if (!strncmp(line, "STOCK ", 6)) soup_copy(stock, FILM_NAME, line + 6);
         else if (!strncmp(line, "FILM ", 5)) film_on = soup_eq_ci(line + 5, "ON");
+        else if (!strncmp(line, "SIZE ", 5)) film_size = soup_eq_ci(line + 5, "FULL");
     }
     fio_free(text);
     for (n = 0; stock[0] && n < film_count; n++)
@@ -263,8 +265,9 @@ static void soup_write_cfg(void)
     FILE *f;
 
     if (film_stock < 0 || film_stock >= film_count) film_stock = 0;
-    n = snprintf(buf, sizeof(buf), "FILM %s\nSTOCK %s\n",
-                 film_on ? "ON" : "OFF", film_names[film_stock]);
+    n = snprintf(buf, sizeof(buf), "FILM %s\nSTOCK %s\nSIZE %s\n",
+                 film_on ? "ON" : "OFF", film_names[film_stock],
+                 film_size ? "FULL" : "HALF");
     if (n <= 0 || n >= (int)sizeof(buf)) return;
     f = FIO_CreateFile(SOUP_CFG);
     if (!f) return;
@@ -617,13 +620,17 @@ static int soup_one(int num, int current)
     soup_show(0);
 
     t0 = get_ms_clock();
-    rc = soup_develop(src, is_cr2, tmp, &stock, soup_progress_cb);
+    rc = soup_develop(src, is_cr2, tmp, &stock,
+                      film_size ? FILM_SCALE_FULL : FILM_SCALE_HALF,
+                      film_size ? FILM_QUALITY_FULL : FILM_QUALITY_HALF,
+                      soup_progress_cb);
     film_last_secs = (get_ms_clock() - t0) / 1000;
 
     if (rc == SE_OK && is_file(tmp) && FIO_RenameFile(tmp, flm) == 0 && is_file(flm)) {
         film_done_count++;
         snprintf(film_status, sizeof(film_status), "FLM_%04d done, %ds", num, film_last_secs);
-        soup_log("FLM_%04d.JPG done in %d s (%s)", num, film_last_secs, stock.name);
+        soup_log("FLM_%04d.JPG done in %d s (%s, %s)", num, film_last_secs, stock.name,
+                 film_size ? "FULL" : "HALF");
         film_batch_done++;
         film_event = 1;
         return 1;
@@ -795,9 +802,11 @@ static struct menu_entry soup_menu[];
 static MENU_UPDATE_FUNC(soup_save_update)
 {
     if (film_stock < 0 || film_stock >= film_count) film_stock = 0;
-    if (film_on != film_saved_on || film_stock != film_saved_stock) {
+    if (film_on != film_saved_on || film_stock != film_saved_stock ||
+        film_size != film_saved_size) {
         film_saved_on = film_on;
         film_saved_stock = film_stock;
+        film_saved_size = film_size;
         soup_write_cfg();
     }
 }
@@ -808,7 +817,7 @@ static MENU_UPDATE_FUNC(soup_main_update)
     if (is_movie_mode())
         MENU_SET_WARNING(MENU_WARN_NOT_WORKING, "Paused in movie mode.");
     if (film_on)
-        MENU_SET_VALUE("ON, %s", film_names[film_stock]);
+        MENU_SET_VALUE("ON, %s%s", film_names[film_stock], film_size ? ", FULL" : "");
 }
 
 static MENU_UPDATE_FUNC(soup_status_update)
@@ -824,7 +833,7 @@ static struct menu_entry soup_menu[] = {
         .max     = 1,
         .select  = soup_menu_select,
         .update  = soup_main_update,
-        .help    = "SET: film picker (also SET on the shooting screen). Q: options.",
+        .help    = "SET: film picker (also SET on the shooting screen). Pict.Style: options.",
         .help2   = "Writes FILM/xxxCANON/FLM_nnnn.JPG. Originals are not touched.",
         .submenu_width = 700,
         .children = (struct menu_entry[]) {
@@ -844,6 +853,15 @@ static struct menu_entry soup_menu[] = {
                 .choices = film_choices,
                 .update = soup_save_update,
                 .help   = "Look applied to new shots. From ML/FILM on the card.",
+            },
+            {
+                .name   = "Size",
+                .priv   = &film_size,
+                .max    = 1,
+                .choices = CHOICES("HALF", "FULL"),
+                .update = soup_save_update,
+                .help   = "HALF: 2800x1872, about 45 s a frame.",
+                .help2  = "FULL: 5616x3744 like Canon's JPEG L, quality 95, minutes.",
             },
             {
                 .name   = "Status",
@@ -867,6 +885,7 @@ static unsigned int soup_init(void)
     if (film_stock < 0 || film_stock >= film_count) film_stock = 0;
     film_saved_on = film_on;
     film_saved_stock = film_stock;
+    film_saved_size = film_size;
 
     stock_entry = &soup_menu[0].children[1];
     stock_entry->choices = film_choices;
