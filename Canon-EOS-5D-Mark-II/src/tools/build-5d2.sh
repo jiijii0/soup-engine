@@ -23,7 +23,9 @@ OUT="$ROOT/card"
 rm -rf "$ML/modules/soup"
 cp -r "$MOD" "$ML/modules/soup"
 
-make -s -C "$ML/platform/5D2.212" >/dev/null
+# Only the symbol list is needed, not the whole camera zip (which also
+# wants `zip` installed): build/5D2_212.sym depends on magiclantern.sym.
+make -s -C "$ML/platform/5D2.212" build/5D2_212.sym >/dev/null
 make -s -C "$ML/modules/soup" SOUP_ENGINE="$SRC/engine" clean >/dev/null
 make -C "$ML/modules/soup" SOUP_ENGINE="$SRC/engine"
 

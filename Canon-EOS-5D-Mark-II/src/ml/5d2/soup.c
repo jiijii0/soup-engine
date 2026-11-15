@@ -19,7 +19,8 @@
  *                   (5616x3744 on the 5D Mark II), as the 5D Classic and
  *                   50D do.
  *   only a JPG   -> the camera's own JPEG (JPEG-only shooting).
- * Output is half size: 2808x1872 from a full-size frame. Canon's playback
+ * Output is half size: 2800x1872 from a full-size frame (2808, trimmed
+ * to a multiple of 16 by the encoder, see engine/jpeg_enc.c). Canon's playback
  * never sees it (it lives outside DCIM); SET in playback shows it instead.
  *
  * State on the card (same files as the 50D build):

@@ -4,8 +4,8 @@ Soup Film
 Film looks for every new shot, developed in the camera.
 
 After each frame, Soup Film runs the picture through the selected film
-stock and writes FILM/xxxCANON/FLM_nnnn.JPG (outside DCIM), 2592x1728
-from a full-size shot. In playback, SET shows the film version. The
+stock and writes FILM/xxxCANON/FLM_nnnn.JPG (outside DCIM), 2800x1872
+from a full-size shot. SET in playback: not on the 5D2 yet. The
 original CR2 or JPG is never modified.
 
 Shoot RAW or RAW+JPEG and it uses the full-size JPEG Canon embeds in the

@@ -16,9 +16,10 @@ A community port, adapted from the [60D port](../Canon-EOS-60D) by [@kookueh](ht
 <br>
 
 > 🚧 **Not tested on a camera yet.** This folder is the 60D module moved
-> to the 5D Mark II. It has not been built or run on a 5D Mark II yet, and
-> there is no prebuilt `soup.mo` in [`card/`](card). Don't use it on a
-> shoot you can't repeat. See [Status](#-status) below.
+> to the 5D Mark II. It builds against Magic Lantern's 5D Mark II build and
+> develops a test frame on a desktop, but it has not run on a 5D Mark II
+> yet. Don't use it on a shoot you can't repeat. See [Status](#-status)
+> below.
 
 <br>
 
@@ -50,7 +51,8 @@ FILM/100CANON/FLM_1234.JPG    the same photo with the look on it
 | | |
 |:--|:--|
 | Module source | adapted from the 60D module, see [What changed from the 60D port](#-what-changed-from-the-60d-port) |
-| Builds against ML `5D2.212` | not yet run |
+| Builds against ML `5D2.212` | yes: `soup.mo` 101,372 bytes; all 79 functions it imports are exported by `5D2.212`; relocations only `R_ARM_ABS32` / `R_ARM_CALL` / `R_ARM_JUMP24`; no `%c` in its strings |
+| Develops on a desktop | yes: the module's own `soup_dev.c` (`host_test.c`) on a synthetic 5616×3744 "Canon EOS 5D Mark II" CR2 gives a 2800×1872 film JPEG with Velvia, Portra, Acros and Soup 800; peak memory about 1.5 MB, nothing leaked |
 | Loads on a 5D Mark II | not yet tried |
 | Develops a frame on the camera | not yet tried |
 | Playback toggle (SET in playback) | **off**: needs the 5D2's playback addresses, see below |
@@ -68,7 +70,7 @@ Everything the 60D port does, on the 5D Mark II:
   the **DEVELOPING** and **DEVELOPED** pages.
 - **A small progress badge** on the shooting screen while frames develop.
 - **RAW, RAW+JPEG and JPEG-only.** From a CR2 it develops the full-size
-  JPEG Canon embeds in it (5616×3744), at half size: 2808×1872.
+  JPEG Canon embeds in it (5616×3744), at half size: 2800×1872 (half is 2808 wide; the JPEG encoder trims to a multiple of 16).
 - **Only shots taken while Film is on are developed.** Photos already on
   the card are left alone.
 - **Film files live outside DCIM**, so Canon's playback is never confused
@@ -89,11 +91,12 @@ first, following their instructions:
 This port is built against `magiclantern.2025-06-20.5D2.212`, Magic
 Lantern commit `ed3e7c0`, the same commit as the 60D and 50D ports.
 
-#### 2️⃣ &nbsp; Build the module
+#### 2️⃣ &nbsp; Get the module
 
-There's no prebuilt `soup.mo` yet, so build it from [`src/`](src) (see
-[`src/README.md`](src/README.md)). The build writes it to
-`card/ML/modules/soup.mo`.
+[`card/`](card) has a `soup.mo` built from this folder with Arm GCC
+13.2.1 (Ubuntu's `gcc-arm-none-eabi`) against Magic Lantern `ed3e7c0`. Or
+build it yourself from [`src/`](src) (see [`src/README.md`](src/README.md));
+the build writes it to `card/ML/modules/soup.mo`.
 
 #### 3️⃣ &nbsp; Copy the files to the card
 
@@ -103,7 +106,7 @@ Lantern put there.
 
 | file | what it is |
 |:--|:--|
-| ⚙️ `ML/modules/soup.mo` | the module (after you build it) |
+| ⚙️ `ML/modules/soup.mo` | the module |
 | ✅ `ML/SETTINGS/soup.en` | an empty file that tells Magic Lantern to load it |
 | 🎞️ `ML/FILM/` | `INDEX.TXT` and the 21 film stocks |
 
@@ -141,7 +144,7 @@ DONE** or **FILM FAILED** for a moment.
 | File | What it is |
 | --- | --- |
 | `DCIM/100CANON/IMG_1234.CR2` / `.JPG` | your photo, never changed |
-| `FILM/100CANON/FLM_1234.JPG` | the film version: 2808×1872 from a full-size shot, half size from smaller ones |
+| `FILM/100CANON/FLM_1234.JPG` | the film version: 2800×1872 from a full-size shot, half size from smaller ones |
 | `ML/SE.CFG` | Film on/off and the chosen stock |
 | `ML/SE.NXT` | where Soup got to, so it can catch up after a restart |
 | `ML/LOGS/SOUP.LOG` | one line per develop, with the stock used |
@@ -228,8 +231,8 @@ stay where they are. If the camera ever hangs, take the battery out.
 | `src/ml/5d2/soup_ui.c` | the playback log line no longer reads the 60D's addresses; notes on SET (C.Fn IV-3) and the 4:3 screen |
 | `src/ml/5d2/soup_dev.c` | EXIF model fallback is `Canon EOS 5D Mark II` |
 | `src/ml/5d2/ML-PIN.txt`, `Makefile`, `README.rst` | 5D2.212 |
-| `src/tools/build-5d2.sh` | builds and checks symbols against `platform/5D2.212` |
-| `card/ML/modules/soup.mo` | removed: the 60D build won't run on a 5D Mark II |
+| `src/tools/build-5d2.sh` | builds and checks symbols against `platform/5D2.212`; builds only Magic Lantern's symbol list, not its whole zip, so `zip` isn't needed |
+| `card/ML/modules/soup.mo` | rebuilt for the 5D Mark II (the 60D build won't run on it) |
 | `doc/` | removed: those were 60D screenshots |
 | `src/engine/` | unchanged. It already knows the 5D Mark II's raw (white level and colour matrix in `cr2.c`) |
 
