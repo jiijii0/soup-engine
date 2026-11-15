@@ -55,6 +55,7 @@
 #include "soup_dev.h"
 #include "soup_ui.h"
 #include "soup_dcim.h"
+#include "soup_iso.h"
 
 extern int ml_started;
 
@@ -76,13 +77,14 @@ extern int ml_started;
 static int film_on;                 /* menu: Film OFF/ON                 */
 static int film_stock;              /* menu: index into film_names       */
 static int film_size;               /* menu: 0 HALF, 1 FULL (JPEG L size) */
+static int film_iso;                /* menu: loading a film sets its ISO  */
 static int film_count;
 static char film_names[FILM_MAX][FILM_NAME];
 static const char *film_choices[FILM_MAX];
 static char film_files[FILM_MAX][FILM_NAME];   /* .fs file per name       */
 static char film_descs[FILM_MAX][48];          /* DESC line, for the picker */
 
-static int film_saved_on = -1, film_saved_stock = -1, film_saved_size = -1;
+static int film_saved_on = -1, film_saved_stock = -1, film_saved_size = -1, film_saved_iso = -1;
 static int film_started;            /* develop task is running           */
 
 /* status, shown in the menu */
@@ -253,6 +255,7 @@ static void soup_read_cfg(void)
         if (!strncmp(line, "STOCK ", 6)) soup_copy(stock, FILM_NAME, line + 6);
         else if (!strncmp(line, "FILM ", 5)) film_on = soup_eq_ci(line + 5, "ON");
         else if (!strncmp(line, "SIZE ", 5)) film_size = soup_eq_ci(line + 5, "FULL");
+        else if (!strncmp(line, "ISO ", 4))  film_iso = soup_eq_ci(line + 4, "ON");
     }
     fio_free(text);
     for (n = 0; stock[0] && n < film_count; n++)
@@ -266,9 +269,9 @@ static void soup_write_cfg(void)
     FILE *f;
 
     if (film_stock < 0 || film_stock >= film_count) film_stock = 0;
-    n = snprintf(buf, sizeof(buf), "FILM %s\nSTOCK %s\nSIZE %s\n",
+    n = snprintf(buf, sizeof(buf), "FILM %s\nSTOCK %s\nSIZE %s\nISO %s\n",
                  film_on ? "ON" : "OFF", film_names[film_stock],
-                 film_size ? "FULL" : "HALF");
+                 film_size ? "FULL" : "HALF", film_iso ? "ON" : "OFF");
     if (n <= 0 || n >= (int)sizeof(buf)) return;
     f = FIO_CreateFile(SOUP_CFG);
     if (!f) return;
@@ -276,27 +279,113 @@ static void soup_write_cfg(void)
     FIO_CloseFile(f);
 }
 
-/* Parse the selected stock. 0 on success. "Standard" (no file) is the
- * engine's neutral default. */
-static int soup_load_stock(int idx, se_stock *s)
+/* ------------------------------------------------------ favourites ---- */
+
+/*
+ * Favourite films come first, in the picker and in the menu's Stock list.
+ * INFO in the picker marks or unmarks the film shown. Kept by name in
+ * ML/SE.FAV, one per line, so they survive INDEX.TXT edits. Everything
+ * else stays in INDEX.TXT order (film_order).
+ *
+ * Reordering swaps rows of the film arrays, which the develop task reads
+ * when it loads a stock, so both take film_sem.
+ */
+#define SOUP_FAV "ML/SE.FAV"
+static char film_fav[FILM_MAX];         /* 1 = favourite, parallel rows     */
+static int  film_order[FILM_MAX];       /* position in INDEX.TXT            */
+static struct semaphore *film_sem;
+
+static void soup_film_lock(void)   { if (film_sem) take_semaphore(film_sem, 0); }
+static void soup_film_unlock(void) { if (film_sem) give_semaphore(film_sem); }
+
+static void soup_film_swap(int a, int b)
 {
-    char path[FILM_PATH];
+    char t[48];
+    int o;
+    char f;
+    memcpy(t, film_names[a], FILM_NAME); memcpy(film_names[a], film_names[b], FILM_NAME); memcpy(film_names[b], t, FILM_NAME);
+    memcpy(t, film_files[a], FILM_NAME); memcpy(film_files[a], film_files[b], FILM_NAME); memcpy(film_files[b], t, FILM_NAME);
+    memcpy(t, film_descs[a], 48);        memcpy(film_descs[a], film_descs[b], 48);        memcpy(film_descs[b], t, 48);
+    f = film_fav[a];   film_fav[a] = film_fav[b];     film_fav[b] = f;
+    o = film_order[a]; film_order[a] = film_order[b]; film_order[b] = o;
+}
+
+/* Favourites first, then INDEX.TXT order; film_stock follows its film. */
+static void soup_film_sort(void)
+{
+    char cur[FILM_NAME];
+    int i, j;
+    soup_copy(cur, sizeof(cur), film_stock >= 0 && film_stock < film_count ? film_names[film_stock] : "");
+    for (i = 1; i < film_count; i++)       /* insertion sort: stable, tiny */
+        for (j = i; j > 0; j--) {
+            int ka = (film_fav[j - 1] ? 0 : 10000) + film_order[j - 1];
+            int kb = (film_fav[j]     ? 0 : 10000) + film_order[j];
+            if (ka <= kb) break;
+            soup_film_swap(j - 1, j);
+        }
+    for (i = 0; i < film_count; i++)
+        if (!strcmp(film_names[i], cur)) { film_stock = i; break; }
+}
+
+static void soup_read_fav(void)
+{
     char *text;
-    int got, rc;
+    int got, i, line0 = 0, n;
+    text = soup_slurp(SOUP_FAV, 2048, &got);
+    if (!text) return;
+    for (i = 0; i <= got; i++) {
+        char *line;
+        if (text[i] != '\n' && text[i] != '\r' && text[i] != 0) continue;
+        text[i] = 0;
+        line = text + line0;
+        line0 = i + 1;
+        for (n = 0; line[0] && n < film_count; n++)
+            if (soup_eq_ci(film_names[n], line)) film_fav[n] = 1;
+    }
+    fio_free(text);
+}
+
+static void soup_write_fav(void)
+{
+    char buf[FILM_MAX * (FILM_NAME + 1) + 1];
+    int i, n = 0;
+    FILE *f;
+    for (i = 0; i < film_count; i++)
+        if (film_fav[i]) n += snprintf(buf + n, sizeof(buf) - n, "%s\n", film_names[i]);
+    if (!n) { if (is_file(SOUP_FAV)) FIO_RemoveFile(SOUP_FAV); return; }
+    f = FIO_CreateFile(SOUP_FAV);
+    if (!f) return;
+    FIO_WriteFile(f, buf, (size_t)n);
+    FIO_CloseFile(f);
+}
+
+/* Parse the selected stock (film_stock, read under the lock: the picker
+ * may be reordering). 0 on success. "Standard" (no file) is the engine's
+ * neutral default. */
+static int soup_load_stock(se_stock *s)
+{
+    char path[FILM_PATH], name[FILM_NAME], file[FILM_NAME];
+    char *text;
+    int got, rc, idx;
 
     se_stock_init(s);
+    soup_film_lock();
+    idx = film_stock;
     if (idx < 0 || idx >= film_count) idx = 0;
-    if (!film_files[idx][0]) {
-        soup_copy(s->name, SE_STOCK_NAME, film_names[idx]);
+    soup_copy(name, sizeof(name), film_names[idx]);
+    soup_copy(file, sizeof(file), film_files[idx]);
+    soup_film_unlock();
+    if (!file[0]) {
+        soup_copy(s->name, SE_STOCK_NAME, name);
         return 0;
     }
-    snprintf(path, sizeof(path), "ML/FILM/%s", film_files[idx]);
+    snprintf(path, sizeof(path), "ML/FILM/%s", file);
     text = soup_slurp(path, 16384, &got);
     if (!text) return -1;
     rc = se_stock_parse(text, (size_t)got, s);
     fio_free(text);
     if (rc != SE_OK) return -1;
-    if (!s->name[0]) soup_copy(s->name, SE_STOCK_NAME, film_names[idx]);
+    if (!s->name[0]) soup_copy(s->name, SE_STOCK_NAME, name);
     return 0;
 }
 
@@ -471,28 +560,235 @@ void soup_flm_path(int num, char *out, int n)
  *   0x59B74  folder << 16 | file   (e.g. 100 << 16 | 2278)
  *   0x2A194  file
  *
- * 5D Mark II 2.1.2: NOT FOUND YET. Firmware addresses differ per body, so
- * the 60D's must never be read here. Until the two 5D2 globals are found
- * the same way (qemu-eos with a 5D2 ROM dump), both are 0 and this always
- * answers "can't tell", so the playback toggle shows that message and
- * everything else works. Fill both in to turn the toggle on.
- * Reading them changes nothing. Both must agree, or we say we can't tell.
+ * 5D Mark II 2.1.2: not known in advance. Firmware addresses differ per
+ * body, so the 60D's must never be read here; the two below stay 0 until
+ * someone finds the 5D2's (in qemu-eos with a ROM dump, as the 60D did).
+ * Instead the camera learns the address itself: see soup_play_learn.
+ * Reading memory changes nothing.
  */
-#define SOUP_PLAY_FOLDER_FILE 0x0   /* folder << 16 | file, 5D2 2.1.2: TODO */
-#define SOUP_PLAY_FILE        0x0   /* file,                5D2 2.1.2: TODO */
+#define SOUP_PLAY_FOLDER_FILE 0x0   /* folder << 16 | file, 5D2 2.1.2: unknown */
+#define SOUP_PLAY_FILE        0x0   /* file,                5D2 2.1.2: unknown */
+
+int soup_list_frames(uint8_t *bits);
+
+/* frame-number bitmaps (1..9999), here and for Develop older */
+#define FBIT(b, n)     ((b)[(n) >> 3] & (1 << ((n) & 7)))
+#define FSET(b, n)     ((b)[(n) >> 3] |= (uint8_t)(1 << ((n) & 7)))
+
+static int soup_is_5d2_212(void)
+{
+    return strstr(camera_model, "5D Mark II") && !strncmp(firmware_version, "2.1.2", 5);
+}
+
+/* The camera's current DCIM folder number. */
+static int soup_folder_now(void)
+{
+    struct card_info *c;
+    if (soup_dcim_folder >= 100) return soup_dcim_folder;
+    c = get_shooting_card();
+    return c ? c->folder_number : 0;
+}
+
+/*
+ * Learning where Canon keeps "the photo on screen".
+ *
+ * Each SET in playback, while the address is unknown, scans Canon's low
+ * memory for 32-bit words holding a frame that exists in the current
+ * folder, either as the plain number (8663) or packed as on the 60D
+ * (108 << 16 | 8663). The first press collects the candidates; every
+ * later press, on a different photo, keeps only those that still hold an
+ * existing frame and have changed. A variable that tracks the display
+ * changes with every photo; counters, settings and "last shot taken" do
+ * not. When one address has changed at least twice and no other has, it
+ * is kept in ML/SE.PLY and the toggle works from then on.
+ *
+ * The module's own memory and the current task's stack hold copies of the
+ * same values (they change with every photo too), so both are left out
+ * of the scan. Every press is logged, so if the camera can't decide,
+ * the address can be picked from ML/LOGS/SOUP.LOG and put in
+ * SOUP_PLAY_FOLDER_FILE above.
+ */
+#define PLAY_LO      0x00001000u        /* Canon's globals sit low: the 60D's */
+#define PLAY_HI      0x00400000u        /*   were at 0x2A194 and 0x59B74      */
+#define PLAY_CAND    192
+#define PLAY_PRESSES 8                  /* give up after this many            */
+#define SOUP_PLY     "ML/SE.PLY"
+
+typedef struct { uint32_t addr, val; uint8_t packed, changes; } play_cand;
+static play_cand pc[PLAY_CAND];
+static int       pc_n, pc_presses, pc_folder = -1;
+static uint8_t   play_bits[(9999 + 8) / 8];
+static uint32_t  play_addr;             /* learned, 0 = not yet               */
+static int       play_packed;
+
+static int play_value_ok(uint32_t v, int packed, int folder)
+{
+    uint32_t n;
+    if (packed) {
+        if ((int)(v >> 16) != folder) return 0;
+        n = v & 0xFFFF;
+    } else {
+        n = v;
+    }
+    return n >= 1 && n <= 9999 && FBIT(play_bits, n);
+}
+
+/* ML/SE.PLY is "ADDR <hex> PACKED <0|1>". Parsed by hand: no sscanf. */
+static void soup_play_load(void)
+{
+    char *t, *s;
+    int got;
+    uint32_t a = 0;
+    t = soup_slurp(SOUP_PLY, 128, &got);
+    if (!t) return;
+    s = strstr(t, "ADDR ");
+    if (s) {
+        for (s += 5; ; s++) {
+            int d = (*s >= '0' && *s <= '9') ? *s - '0' :
+                    (*s >= 'a' && *s <= 'f') ? *s - 'a' + 10 :
+                    (*s >= 'A' && *s <= 'F') ? *s - 'A' + 10 : -1;
+            if (d < 0) break;
+            a = a * 16 + (uint32_t)d;
+        }
+        if (a >= PLAY_LO && a < PLAY_HI && !(a & 3)) {
+            play_addr = a;
+            s = strstr(t, "PACKED ");
+            play_packed = s && s[7] == '1';     /* logged by soup_task, not at init */
+        }
+    }
+    fio_free(t);
+}
+
+static void soup_play_save(void)
+{
+    char b[64];
+    int n = snprintf(b, sizeof(b), "ADDR %x PACKED %d\n", (unsigned)play_addr, play_packed);
+    FILE *f = FIO_CreateFile(SOUP_PLY);
+    if (!f) return;
+    FIO_WriteFile(f, b, (size_t)n);
+    FIO_CloseFile(f);
+}
+
+static void play_log_cands(const char *what)
+{
+    char line[160];
+    int i, k = 0;
+    k += snprintf(line + k, sizeof(line) - k, "playback learn %s, press %d: %d left", what, pc_presses, pc_n);
+    for (i = 0; i < pc_n && i < 8 && k < (int)sizeof(line) - 24; i++)
+        k += snprintf(line + k, sizeof(line) - k, " %x=%x/%d%s", (unsigned)pc[i].addr,
+                      (unsigned)pc[i].val, pc[i].changes, pc[i].packed ? "p" : "");
+    soup_log("%s", line);
+}
+
+/* One SET in playback while the address is unknown. Writes a message for
+ * the screen; returns 1 once the address is learned. */
+int soup_play_learn(char *msg, int msglen)
+{
+    int folder = soup_folder_now(), i, best = -1, nbest = 0, top = 0;
+    volatile uint32_t *p;
+    uint32_t mod_lo, mod_hi, stk_lo, stk_hi;
+
+    if (!soup_is_5d2_212() || folder < 100) {
+        snprintf(msg, msglen, " FILM: CAN'T TELL WHICH PHOTO THIS IS ");
+        return 0;
+    }
+    if (folder != pc_folder) {
+        memset(play_bits, 0, sizeof(play_bits));
+        soup_list_frames(play_bits);
+        pc_folder = folder;
+        pc_n = pc_presses = 0;
+    }
+    /* our own data, and this task's stack, hold the same values: skip */
+    mod_lo = (uint32_t)pc - 0x20000;  mod_hi = (uint32_t)pc + 0x20000;
+    stk_lo = (uint32_t)&i - 0x10000;  stk_hi = (uint32_t)&i + 0x10000;
+
+    if (pc_presses == 0) {
+        for (p = (volatile uint32_t *)PLAY_LO; (uint32_t)p < PLAY_HI && pc_n < PLAY_CAND; p++) {
+            uint32_t a = (uint32_t)p, v;
+            if ((a >= mod_lo && a < mod_hi) || (a >= stk_lo && a < stk_hi)) continue;
+            v = *p;
+            if (play_value_ok(v, 1, folder) || play_value_ok(v, 0, folder)) {
+                pc[pc_n].addr = a; pc[pc_n].val = v;
+                pc[pc_n].packed = (uint8_t)play_value_ok(v, 1, folder);
+                pc[pc_n].changes = 0;
+                pc_n++;
+            }
+        }
+        pc_presses = 1;
+        play_log_cands("start");
+        snprintf(msg, msglen, " FILM: LEARNING 1 - NEXT PHOTO, THEN SET ");
+        return 0;
+    }
+
+    /* keep what still holds an existing frame; count changes */
+    {
+        int k = 0;
+        for (i = 0; i < pc_n; i++) {
+            uint32_t v = *(volatile uint32_t *)pc[i].addr;
+            if (!play_value_ok(v, pc[i].packed, folder)) continue;
+            if (v != pc[i].val && pc[i].changes < 255) pc[i].changes++;
+            pc[i].val = v;
+            pc[k++] = pc[i];
+        }
+        pc_n = k;
+    }
+    pc_presses++;
+    for (i = 0; i < pc_n; i++) if (pc[i].changes > top) top = pc[i].changes;
+    for (i = 0; i < pc_n; i++)
+        if (pc[i].changes == top) {
+            /* a packed folder|file word beats a plain number of the same score */
+            if (best < 0 || (pc[i].packed && !pc[best].packed)) best = i;
+            nbest++;
+        }
+    if (best >= 0 && pc[best].packed) {           /* count only equals of its kind */
+        nbest = 0;
+        for (i = 0; i < pc_n; i++) if (pc[i].changes == top && pc[i].packed) nbest++;
+    }
+    play_log_cands("step");
+
+    if (top >= 2 && nbest == 1) {
+        play_addr = pc[best].addr;
+        play_packed = pc[best].packed;
+        soup_play_save();
+        soup_log("playback learn: using %x (%s), saved in %s", (unsigned)play_addr,
+                 play_packed ? "folder|file" : "file", SOUP_PLY);
+        snprintf(msg, msglen, " FILM: LEARNED ");
+        return 1;
+    }
+    if (pc_n == 0 || pc_presses >= PLAY_PRESSES) {
+        soup_log("playback learn: no single answer after %d presses, see the lines above", pc_presses);
+        pc_n = pc_presses = 0;
+        snprintf(msg, msglen, " FILM: COULDN'T LEARN - SEE ML/LOGS/SOUP.LOG ");
+        return 0;
+    }
+    snprintf(msg, msglen, " FILM: LEARNING %d - NEXT PHOTO, THEN SET ", pc_presses);
+    return 0;
+}
 
 int soup_play_current(int *folder, int *num)
 {
     uint32_t a, b;
-    if (!SOUP_PLAY_FOLDER_FILE || !SOUP_PLAY_FILE) return -1;
-    if (!strstr(camera_model, "5D Mark II") || strncmp(firmware_version, "2.1.2", 5) != 0)
-        return -1;
-    a = *(volatile uint32_t *)SOUP_PLAY_FOLDER_FILE;
-    b = *(volatile uint32_t *)SOUP_PLAY_FILE;
-    if ((a & 0xFFFF) != b || b < 1 || b > 9999) return -1;
-    if ((a >> 16) < 100 || (a >> 16) > 999) return -1;
-    *folder = (int)(a >> 16);
-    *num = (int)b;
+    if (!soup_is_5d2_212()) return -1;
+    if (SOUP_PLAY_FOLDER_FILE && SOUP_PLAY_FILE) {
+        a = *(volatile uint32_t *)SOUP_PLAY_FOLDER_FILE;
+        b = *(volatile uint32_t *)SOUP_PLAY_FILE;
+        if ((a & 0xFFFF) != b || b < 1 || b > 9999) return -1;
+        if ((a >> 16) < 100 || (a >> 16) > 999) return -1;
+        *folder = (int)(a >> 16);
+        *num = (int)b;
+        return 0;
+    }
+    if (!play_addr) return -1;
+    a = *(volatile uint32_t *)play_addr;
+    if (play_packed) {
+        if ((a >> 16) < 100 || (a >> 16) > 999 || (a & 0xFFFF) < 1 || (a & 0xFFFF) > 9999) return -1;
+        *folder = (int)(a >> 16);
+        *num = (int)(a & 0xFFFF);
+    } else {
+        if (a < 1 || a > 9999) return -1;
+        *folder = soup_folder_now();
+        *num = (int)a;
+    }
     return 0;
 }
 
@@ -591,7 +887,13 @@ static int soup_frame(int num, int current, int how)
     soup_paths(num, cr2, jpg, flm, tmp, FILM_PATH);
     if (is_file(flm) && !(how & FRAME_REPLACE)) return 2;
 
-    if (is_file(cr2)) {
+    if (is_file(cr2) && is_file(jpg)) {
+        /* RAW+JPEG: Canon's JPEG L is a better source than the more
+         * compressed preview inside the CR2; a smaller JPEG is not */
+        if (!soup_settled(cr2, FILM_MIN_CR2) || !soup_settled(jpg, FILM_MIN_JPG)) return 0;
+        if (soup_prefer_jpeg(cr2, jpg)) { src = jpg; is_cr2 = 0; }
+        else                            { src = cr2; is_cr2 = 1; }
+    } else if (is_file(cr2)) {
         if (!soup_settled(cr2, FILM_MIN_CR2)) return 0;
         src = cr2; is_cr2 = 1;
     } else if (is_file(jpg)) {
@@ -610,7 +912,7 @@ static int soup_frame(int num, int current, int how)
     /* Do not compete with the camera for the card mid-burst. */
     while (!job_state_ready_to_take_pic()) msleep(200);
 
-    if (soup_load_stock(film_stock, &stock) != 0) {
+    if (soup_load_stock(&stock) != 0) {
         soup_log("stock %s unreadable", film_names[film_stock]);
         return -1;
     }
@@ -694,11 +996,12 @@ static int job_t0;
 static uint8_t job_bits[(9999 + 8) / 8];/* frame numbers to visit           */
 static char job_status[48] = "SET to start";
 
-#define JOB_BIT(n)     (job_bits[(n) >> 3] & (1 << ((n) & 7)))
-#define JOB_SET(n)     (job_bits[(n) >> 3] |= (uint8_t)(1 << ((n) & 7)))
+#define JOB_BIT(n)     FBIT(job_bits, n)
+#define JOB_SET(n)     FSET(job_bits, n)
 
-/* Every IMG_nnnn.JPG / .CR2 in the camera folder. Listed once, at start. */
-static int soup_job_list_folder(void)
+/* Every IMG_nnnn.JPG / .CR2 in the camera folder, as bits in `bits`
+ * (cleared by the caller). Returns how many. */
+int soup_list_frames(uint8_t *bits)
 {
     char dir[FILM_PATH];
     struct fio_file *f;
@@ -715,7 +1018,7 @@ static int soup_job_list_folder(void)
             int num;
             if (fi.mode & ATTR_DIRECTORY) continue;
             num = soup_frame_number(fi.name);
-            if (num > 0 && !JOB_BIT(num)) { JOB_SET(num); n++; }
+            if (num > 0 && !FBIT(bits, num)) { FSET(bits, num); n++; }
         } while (FIO_FindNextEx(d, f) == 0);
         FIO_FindClose(d);
     }
@@ -735,7 +1038,7 @@ static void soup_job_start(struct card_info *card, int current)
         for (k = current - last[job_scope] + 1; k <= current; k++)
             if (k >= 1 && k <= 9999) { JOB_SET(k); job_total++; }
     } else {
-        job_total = soup_job_list_folder();
+        job_total = soup_list_frames(job_bits);
     }
     if (job_total == 0) {
         snprintf(job_status, sizeof(job_status), "no photos found");
@@ -837,8 +1140,9 @@ static void soup_task(void *unused)
     msleep(3000);                    /* let the camera finish booting */
     {
         struct card_info *c = get_shooting_card();
-        soup_log("soup.mo started, %d stocks, film %s, file number %d, ML dir %s",
-                 film_count, film_on ? "ON" : "OFF", c ? c->file_number : -1, get_dcim_dir());
+        soup_log("soup.mo started, %d stocks, film %s, file number %d, ML dir %s, playback address %x%s",
+                 film_count, film_on ? "ON" : "OFF", c ? c->file_number : -1, get_dcim_dir(),
+                 (unsigned)play_addr, play_addr ? (play_packed ? " (folder|file)" : " (file)") : " (not learned)");
     }
 
     for (;;) {
@@ -926,6 +1230,41 @@ static void soup_task(void *unused)
     }
 }
 
+/* ------------------------------------------------- film sets ISO ---- */
+
+/*
+ * Called from the UI task (soup_ui.c) every few tens of ms, so a film
+ * loaded by the picker or the menu sets its ISO at once even while the
+ * develop task is busy with a two-minute FULL frame. Acts only when the
+ * film changes: the first look after boot is the baseline, and an ISO
+ * set by hand afterwards stays. Only in P, Tv, Av and M; never in movie
+ * mode or the automatic modes. See soup_iso.h for the speeds.
+ */
+void soup_iso_tick(void)
+{
+    static char seen[FILM_NAME];
+    static int started;
+    const char *name;
+    int iso, raw;
+
+    if (film_stock < 0 || film_stock >= film_count) return;
+    name = film_names[film_stock];
+    if (!started) { started = 1; soup_copy(seen, sizeof(seen), name); return; }
+    if (!strcmp(seen, name)) return;
+    soup_copy(seen, sizeof(seen), name);
+
+    iso = soup_film_iso(name);
+    if (!film_iso || !iso) return;
+    if (is_movie_mode() ||
+        !(shooting_mode == SHOOTMODE_P || shooting_mode == SHOOTMODE_TV ||
+          shooting_mode == SHOOTMODE_AV || shooting_mode == SHOOTMODE_M))
+        return;
+    raw = soup_raw_iso(iso);
+    if (lens_info.raw_iso == raw) return;
+    lens_set_rawiso(raw);
+    soup_log("film %s: ISO %d (raw %d), camera now raw %d", name, iso, raw, (int)lens_info.raw_iso);
+}
+
 /* ------------------------------------------------- picker accessors ---- */
 
 int         soup_ui_count(void)     { return film_count; }
@@ -933,6 +1272,26 @@ const char *soup_ui_name(int i)     { return (i >= 0 && i < film_count) ? film_n
 const char *soup_ui_desc(int i)     { return (i >= 0 && i < film_count) ? film_descs[i] : ""; }
 int         soup_ui_current(void)   { return film_stock; }
 int         soup_ui_film_on(void)   { return film_on; }
+int         soup_ui_fav(int i)      { return (i >= 0 && i < film_count) ? film_fav[i] : 0; }
+
+/* INFO in the picker: mark or unmark film i. Returns where that film is
+ * after the reorder, so the picker stays on it. */
+int soup_ui_toggle_fav(int i)
+{
+    char name[FILM_NAME];
+    int k, at = i;
+    if (i < 0 || i >= film_count) return i;
+    soup_film_lock();
+    soup_copy(name, sizeof(name), film_names[i]);
+    film_fav[i] = !film_fav[i];
+    soup_film_sort();
+    for (k = 0; k < film_count; k++)
+        if (!strcmp(film_names[k], name)) { at = k; break; }
+    soup_film_unlock();
+    soup_write_fav();
+    soup_log("favourite %s: %s", name, film_fav[at] ? "on" : "off");
+    return at;
+}
 
 void soup_ui_get_progress(soup_progress *p)
 {
@@ -974,10 +1333,11 @@ static MENU_UPDATE_FUNC(soup_save_update)
 {
     if (film_stock < 0 || film_stock >= film_count) film_stock = 0;
     if (film_on != film_saved_on || film_stock != film_saved_stock ||
-        film_size != film_saved_size) {
+        film_size != film_saved_size || film_iso != film_saved_iso) {
         film_saved_on = film_on;
         film_saved_stock = film_stock;
         film_saved_size = film_size;
+        film_saved_iso = film_iso;
         soup_write_cfg();
     }
 }
@@ -989,6 +1349,14 @@ static MENU_UPDATE_FUNC(soup_main_update)
         MENU_SET_WARNING(MENU_WARN_NOT_WORKING, "Paused in movie mode.");
     if (film_on)
         MENU_SET_VALUE("ON, %s%s", film_names[film_stock], film_size ? ", FULL" : "");
+}
+
+static MENU_UPDATE_FUNC(soup_iso_update)
+{
+    int iso = film_count ? soup_film_iso(film_names[film_stock]) : 0;
+    soup_save_update(entry, info);
+    if (!iso) MENU_SET_RINFO("this film: leaves ISO");
+    else      MENU_SET_RINFO("this film: ISO %d", iso);
 }
 
 static MENU_SELECT_FUNC(soup_job_select)
@@ -1046,6 +1414,15 @@ static struct menu_entry soup_menu[] = {
                 .help2  = "FULL: 5616x3744 like Canon's JPEG L, quality 95, minutes.",
             },
             {
+                .name   = "Film sets ISO",
+                .priv   = &film_iso,
+                .max    = 1,
+                .choices = CHOICES("OFF", "ON"),
+                .update = soup_iso_update,
+                .help   = "ON: loading a film sets its box speed, like a roll (Tri-X: 400).",
+                .help2  = "Only when you load it, only in P/Tv/Av/M. ISO set after stays.",
+            },
+            {
                 .name   = "Older photos",
                 .priv   = &job_scope,
                 .max    = 3,
@@ -1086,12 +1463,21 @@ static unsigned int soup_init(void)
 {
     struct menu_entry *stock_entry;
 
+    film_sem = create_named_semaphore("soup_film", 1);
     soup_read_index();
+    {
+        int i;
+        for (i = 0; i < film_count; i++) { film_order[i] = i; film_fav[i] = 0; }
+    }
     soup_read_cfg();
     if (film_stock < 0 || film_stock >= film_count) film_stock = 0;
+    soup_read_fav();
+    soup_film_sort();                   /* favourites first; keeps film_stock */
+    soup_play_load();                   /* a playback address learned before */
     film_saved_on = film_on;
     film_saved_stock = film_stock;
     film_saved_size = film_size;
+    film_saved_iso = film_iso;
 
     stock_entry = &soup_menu[0].children[1];
     stock_entry->choices = film_choices;

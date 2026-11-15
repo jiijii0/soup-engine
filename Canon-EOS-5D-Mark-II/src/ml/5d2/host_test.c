@@ -2,6 +2,7 @@
  * host_test.c - run soup_dev.c on the desktop.
  *
  *   host_test <in.CR2|in.JPG> <stock.fs|-> <out.jpg> [half|full]
+ *   host_test --pick <in.CR2> <in.JPG>     RAW+JPEG: prints jpeg or cr2
  *
  * The same soup_dev.c the camera runs, over stdio. Reports time, the
  * output size and the peak memory the develop asked for, which is what has
@@ -53,6 +54,11 @@ int main(int argc, char **argv)
 
     int scale = FILM_SCALE_HALF, quality = FILM_QUALITY_HALF;
 
+    if (argc == 4 && !strcmp(argv[1], "--pick")) {
+        /* RAW+JPEG: which one would the camera develop? */
+        printf("%s\n", soup_prefer_jpeg(argv[2], argv[3]) ? "jpeg" : "cr2");
+        return 0;
+    }
     if (argc != 4 && argc != 5) {
         fprintf(stderr, "usage: host_test <in.CR2|in.JPG> <stock.fs|-> <out.jpg> [half|full]\n");
         return 2;

@@ -39,6 +39,10 @@ int soup_develop(const char *src, int is_cr2, const char *out,
                  const se_stock *stock, int scale, int quality,
                  se_progress_fn progress);
 
+/* RAW+JPEG: 1 if the camera JPEG is at least as large as the CR2's
+ * preview (JPEG L), so it is the better source; 0 to use the CR2. */
+int soup_prefer_jpeg(const char *cr2, const char *jpg);
+
 /* Paint a film JPEG, fitted and centred, into a W x H 4:2:2 (UYVY,
  * signed chroma) buffer with `pitch` bytes per row. Stops early if
  * *abort turns non-zero (returns SOUP_VIEW_CANCELLED). */

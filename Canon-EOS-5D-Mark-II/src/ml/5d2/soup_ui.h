@@ -18,12 +18,16 @@ int         soup_ui_take_event(void);  /* 1 finished, 2 failed, 0 none; clears *
 void        soup_flm_path(int num, char *out, int n);  /* B:/FILM/xxxCANON/FLM_nnnn.JPG */
 void        soup_flm_path_in(int folder, int num, char *out, int n);
 int         soup_play_current(int *folder, int *num);  /* photo in playback; -1 unknown */
+int         soup_play_learn(char *msg, int msglen);    /* one learning step; 1 = learned */
 int         soup_ui_count(void);
 const char *soup_ui_name(int i);
 const char *soup_ui_desc(int i);
 int         soup_ui_current(void);
 void        soup_ui_choose(int i);      /* select stock i and turn Film on */
+void        soup_iso_tick(void);        /* Film sets ISO: call often       */
 int         soup_ui_film_on(void);
+int         soup_ui_fav(int i);         /* 1 if film i is a favourite      */
+int         soup_ui_toggle_fav(int i);  /* returns film i's new position   */
 
 /* provided by soup_ui.c */
 void         soup_ui_start(void);

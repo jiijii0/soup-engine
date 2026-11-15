@@ -11,6 +11,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "soup_dcim.h"
+#include "soup_iso.h"
 
 static int fails, checks;
 
@@ -80,6 +81,27 @@ int main(void)
             if (got != fn[i].want) { fails++; printf("FAIL frame_number(%s) = %d, want %d\n", fn[i].name, got, fn[i].want); }
         }
         printf("ok   frame numbers from file names (%u cases)\n", (unsigned)(sizeof fn / sizeof fn[0]));
+    }
+
+    {
+        static const struct { const char *name; int iso; int raw; } fi[] = {
+            { "TRI-X 400", 400, 88 },      { "DELTA 3200", 3200, 112 },  { "VISION3 250D", 250, 83 },
+            { "EKTACHROME E100", 100, 72 }, { "PORTRA 160", 160, 77 },    { "PORTRA 800", 800, 96 },
+            { "VELVIA", 100, 72 },         { "KODACHROME 64", 100, 72 }, { "CLASSIC CHROME", 100, 72 },
+            { "HP5 PLUS", 400, 88 },       { "VERICOLOR III", 160, 77 }, { "PORTRA 400 V2", 400, 88 },
+            { "5D CLASSIC", 0, 0 },        { "PACIFIC BLUES", 0, 0 },    { "STANDARD", 0, 0 },
+            { "SOUP 800", 800, 96 },       { "PRO 400H", 400, 88 },      { "T-MAX 400", 400, 88 },
+        };
+        unsigned i;
+        for (i = 0; i < sizeof fi / sizeof fi[0]; i++) {
+            int iso = soup_film_iso(fi[i].name), raw = soup_raw_iso(iso);
+            checks++;
+            if (iso != fi[i].iso || raw != fi[i].raw) {
+                fails++;
+                printf("FAIL film ISO %s: %d (raw %d), want %d (raw %d)\n", fi[i].name, iso, raw, fi[i].iso, fi[i].raw);
+            }
+        }
+        printf("ok   film box speeds (%u films)\n", (unsigned)(sizeof fi / sizeof fi[0]));
     }
 
     printf("%d checks, %d failed\n", checks, fails);

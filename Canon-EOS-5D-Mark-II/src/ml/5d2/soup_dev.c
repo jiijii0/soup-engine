@@ -250,6 +250,109 @@ static int soup_cr2_thumb(const uint8_t *hdr, int got, uint32_t *off, uint32_t *
     return 0;
 }
 
+/* --------------------------------------------------- source choice ---- */
+
+/* Width and height of the JPEG `path` (is_cr2: of the preview inside the
+ * CR2). 0 on success. Reads the first FILM_HDR bytes only. */
+static int soup_source_dims(const char *path, int is_cr2, int *w, int *h)
+{
+    uint8_t *dma = fio_malloc(FILM_HDR), *hdr = malloc(FILM_HDR);
+    uint32_t fsize = 0, poff = 0, plen = 0;
+    se_jdec_info ji;
+    FILE *f = 0;
+    int got, pw = 0, ph = 0, rc = -1;
+
+    if (!dma || !hdr || FIO_GetFileSize(path, &fsize) != 0 || !fsize) goto out;
+    f = FIO_OpenFile(path, O_RDONLY);
+    if (!f) goto out;
+    got = fsize < FILM_HDR ? (int)fsize : FILM_HDR;
+    if (soup_read_at(f, 0, hdr, (uint32_t)got, dma, FILM_HDR) != 0) goto out;
+    if (is_cr2) {
+        if (se_cr2_find_preview(hdr, (size_t)got, &poff, &plen, &pw, &ph) != SE_OK) goto out;
+        if (poff >= (uint32_t)got) goto out;
+    }
+    if (se_jpeg_dec_info(hdr + poff, (size_t)got - poff, &ji) != SE_OK) goto out;
+    *w = ji.width; *h = ji.height;
+    rc = 0;
+out:
+    if (f) FIO_CloseFile(f);
+    if (dma) fio_free(dma);
+    if (hdr) free(hdr);
+    return rc;
+}
+
+/*
+ * RAW+JPEG: which of the two to develop? The camera's own JPEG when it is
+ * at least as large as the preview inside the CR2 (JPEG L): it is Canon's
+ * best JPEG of the frame, while the CR2 preview is a separate, more
+ * compressed one. A smaller camera JPEG (M or S) loses to the full-size
+ * preview. 1 = the JPEG, 0 = the CR2.
+ */
+int soup_prefer_jpeg(const char *cr2, const char *jpg)
+{
+    int jw = 0, jh = 0, cw = 0, ch = 0;
+    if (soup_source_dims(jpg, 0, &jw, &jh) != 0) return 0;
+    if (soup_source_dims(cr2, 1, &cw, &ch) != 0) return 1;
+    return jw >= cw && jh >= ch;
+}
+
+/* ------------------------------------------------ tinted thumbnail ---- */
+
+/*
+ * The film file's EXIF thumbnail: the source's own 160x120 thumbnail run
+ * through the same look, so a file browser or import app shows the film
+ * version rather than Canon's original colours. After the 7D port's
+ * graded_thumb. Optional: any failure keeps Canon's thumbnail.
+ */
+#define SOUP_TH_CAP 7000                /* inside the encoder's 8 KB EXIF block */
+
+typedef struct { uint8_t *buf; size_t len, cap; } soup_mem;
+
+static int soup_mem_sink(void *ctx, const uint8_t *d, size_t n)
+{
+    soup_mem *m = (soup_mem *)ctx;
+    if (n > m->cap - m->len) return -1;
+    memcpy(m->buf + m->len, d, n);
+    m->len += n;
+    return 0;
+}
+
+static int soup_tint_thumb(const se_stock *stock, const uint8_t *jpg, uint32_t len,
+                           uint8_t *out)
+{
+    se_arena a, la;
+    se_jdec_info ji;
+    se_look lk;
+    soup_look P;
+    soup_mem mb;
+    uint8_t *mem, *strip;
+    size_t ls;
+    int r = -1;
+
+    if (se_jpeg_dec_info(jpg, len, &ji) != SE_OK || ji.width < 16 ||
+        ji.width > 320 || ji.height < 16 || ji.height > 320)
+        return -1;
+    mem = malloc(160 * 1024);
+    if (!mem) return -1;
+    memset(&P, 0, sizeof P);
+    se_arena_init(&a, mem, 96 * 1024);
+    se_look_from_stock(stock, 4, &lk);   /* coarsest scale: grain and glow stay small */
+    ls = se_look_fit(&lk, ji.width, 60 * 1024);
+    se_arena_init(&la, mem + 96 * 1024, ls < 64 * 1024 ? ls : 64 * 1024);
+    P.enc = SE_NEW(&a, se_jpeg, 1);
+    strip = SE_NEW(&a, uint8_t, (size_t)8 * ji.width * 3);
+    P.ow = ji.width;
+    if (!P.enc || !strip || se_look_begin(&P.run, &lk, ji.width, &la) != SE_OK) goto out;
+    mb.buf = out; mb.len = 0; mb.cap = SOUP_TH_CAP;
+    if (se_jpeg_begin(P.enc, ji.width, ji.height, 75, strip, 0, soup_mem_sink, &mb) != SE_OK) goto out;
+    if (se_jpeg_decode_scaled(jpg, len, 1, &a, soup_rows, &P, &ji) != SE_OK || P.err) goto out;
+    if (se_look_end(P.run, soup_emit, &P) != SE_OK || se_jpeg_end(P.enc) != SE_OK || P.err) goto out;
+    r = (int)mb.len;
+out:
+    free(mem);
+    return r;
+}
+
 /*
  * Develop one frame. `src` is a CR2 (is_cr2 = 1) or a plain JPEG. The
  * result is written to `tmp`; the caller renames it into place.
@@ -315,6 +418,18 @@ int soup_develop(const char *src, int is_cr2, const char *tmp,
         }
     }
     if (poff >= (uint32_t)got || poff + plen > fsize) { rc = SE_E_BADFILE; goto done; }
+
+    /* the film file's thumbnail shows the film too (before the big
+     * buffers are allocated, so the two never add up) */
+    if (thumb) {
+        uint8_t *g = malloc(SOUP_TH_CAP);
+        int gl = g ? soup_tint_thumb(stock, thumb, tlen, g) : -1;
+        if (gl > 0) { free(thumb); thumb = g; tlen = (uint32_t)gl; }
+        else {
+            if (g) free(g);
+            soup_log("%s: thumbnail kept untinted", src);
+        }
+    }
     if (se_jpeg_dec_info(hdr + poff, (size_t)got - poff, &ji) != SE_OK) {
         soup_log("%s: preview header not understood", src);
         rc = SE_E_BADFILE; goto done;

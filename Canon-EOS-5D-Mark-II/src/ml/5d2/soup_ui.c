@@ -17,10 +17,9 @@
  *           re-asserted every 200 ms, because Canon resets the palette
  *           after a shot's image review -- and put back from Canon's
  *           shadow copy when it closes.
- *   DRAW    Each 240-line row of the picker is written to two rows of
- *           Magic Lantern's 720x480 bitmap. The 5D2's panel is 4:3
- *           (CONFIG_4_3_SCREEN), so the picker, laid out for the 60D's 3:2
- *           screen, shows about 11% narrower than drawn. Not yet adjusted.
+ *   DRAW    The 720x240 picker is scaled into 427 of the bitmap's 480
+ *           lines, centred, because the 5D2's 4:3 panel shows the 720
+ *           bitmap columns 8/9 as wide as on a 3:2 one (see ui_blit).
  *   KEYS    Either dial or joystick left/right: film. SET: choose it (and
  *           turn Film on). Trash or MENU: close. Half-shutter: close and
  *           shoot.
@@ -110,22 +109,34 @@ static void pal_restore(void)
     }
 }
 
+/*
+ * The 5D Mark II's panel is 4:3 (CONFIG_4_3_SCREEN): Magic Lantern's 720
+ * bitmap columns span a width that holds 640 square pixels, so each column
+ * is 8/9 as wide as a row is tall. Drawn row-doubled to 480 lines, as on
+ * the 60D's 3:2 panel, the picker came out 11% too narrow for its height.
+ * So it is drawn 8/9 as tall instead -- 427 lines, centred -- which gives
+ * the shapes their proportions back, with paper above and below.
+ */
+#define UI_ROWS  ((2 * SE_UI_H * 8 + 4) / 9)      /* 427 of the 480 lines */
+#define UI_TOP   ((480 - UI_ROWS) / 2)
+
 static void ui_blit(void)
 {
     uint8_t *b = bmp_vram();
-    int x, y;
+    uint8_t paper = PAL_BASE + 6;                  /* ui_pal[6]: PAPER */
+    int x, r;
     if (!b) return;
-    for (y = 0; y < SE_UI_H; y++) {
-        const uint8_t *src = ui_fb + y * SE_UI_PITCH;
-        uint8_t *r0 = b + (2 * y) * BMPPITCH;
-        uint8_t *r1 = r0 + BMPPITCH;
+    for (r = 0; r < 480; r++) {
+        uint8_t *dst = b + r * BMPPITCH;
+        int y = r - UI_TOP;
+        const uint8_t *src;
+        if (y < 0 || y >= UI_ROWS) { memset(dst, paper, SE_UI_W); continue; }
+        src = ui_fb + (y * SE_UI_H / UI_ROWS) * SE_UI_PITCH;   /* nearest row */
         for (x = 0; x < SE_UI_W; x += 2) {
             uint8_t v = src[x >> 1];
             uint8_t lo = v & 15, hi = v >> 4;
-            uint8_t c0 = lo ? PAL_BASE + lo : COLOR_EMPTY;
-            uint8_t c1 = hi ? PAL_BASE + hi : COLOR_EMPTY;
-            r0[x] = c0; r0[x + 1] = c1;
-            r1[x] = c0; r1[x + 1] = c1;
+            dst[x]     = lo ? PAL_BASE + lo : COLOR_EMPTY;
+            dst[x + 1] = hi ? PAL_BASE + hi : COLOR_EMPTY;
         }
     }
 }
@@ -163,22 +174,34 @@ static void ui_draw(void)
     ui_dirty = 0;
 }
 
-static void ui_do_open(void)
+/* Favourites show as "* NAME" (the font's star) and come first. */
+static char ui_names[SOUP_UI_MAX][40];
+
+static int ui_fill_list(void)
 {
     int i, n = soup_ui_count();
+    if (n > SOUP_UI_MAX) n = SOUP_UI_MAX;
+    for (i = 0; i < n; i++) {
+        snprintf(ui_names[i], sizeof(ui_names[i]), "%s%s",
+                 soup_ui_fav(i) ? "* " : "", soup_ui_name(i));
+        ui_list[i].name = ui_names[i];
+        ui_list[i].desc = soup_ui_desc(i);
+    }
+    return n;
+}
+
+static void ui_do_open(void)
+{
+    int i, n;
 
     if (!ui_fb) ui_fb = malloc(SE_UI_FB_SIZE);
     if (!ui_fb) return;
-    if (n > SOUP_UI_MAX) n = SOUP_UI_MAX;
-    for (i = 0; i < n; i++) {
-        ui_list[i].name = soup_ui_name(i);
-        ui_list[i].desc = soup_ui_desc(i);
-    }
+    n = ui_fill_list();
     se_ui_init(&ui);
     se_ui_set_stocks(&ui, ui_list, n);
     ui.stock = soup_ui_current();
     ui.ready = 1;
-    ui.hints = "\x01\x02 FILM    SET CHOOSE    DEL CLOSE";
+    ui.hints = "\x01\x02 FILM   SET CHOOSE   INFO FAV   DEL CLOSE";
     ui.hints_work = "\x01\x02 FILM LIST    DEL CLOSE";
     ui.done_note = "SAVED IN THE FILM FOLDER ON THE CARD";
     ui_view_stock = 0;
@@ -332,11 +355,13 @@ static void play_toggle(void)
     if (!is_pure_play_photo_mode()) return;
 
     if (soup_play_current(&folder, &num) != 0) {
-        /* (the 60D logged its two raw playback globals here; the 5D2's
-         * are not known yet, see soup_play_current) */
-        soup_log("playback: can't tell which photo");
-        play_message(" FILM: CAN'T TELL WHICH PHOTO THIS IS ");
-        return;
+        /* The 5D2's "photo on screen" address is learned on the camera:
+         * each SET here is one step (soup_play_learn in soup.c). Once
+         * learned, carry straight on and show this photo's film. */
+        char msg[64];
+        int learned = soup_play_learn(msg, sizeof(msg));
+        play_message(msg);
+        if (!learned || soup_play_current(&folder, &num) != 0) return;
     }
     soup_flm_path_in(folder, num, path, sizeof(path));
     if (!is_file(path)) {
@@ -410,12 +435,20 @@ static void soup_ui_task(void *unused)
     (void)unused;
     for (;;) {
         int r = ui_req;
+        soup_iso_tick();             /* a film just loaded sets its ISO */
         if (r) {
             ui_req = 0;
             if (r == 1 && !ui_open) ui_do_open();
             else if (r == 2) ui_do_close(1, 1);
             else if (r == 3) ui_do_close(0, 1);
             else if (r == 4) play_toggle();
+            else if (r == 5 && ui_open) {
+                /* INFO: favourite on/off; the list reorders, stay on it */
+                int at = soup_ui_toggle_fav(ui.stock);
+                se_ui_set_stocks(&ui, ui_list, ui_fill_list());
+                ui.stock = at;
+                ui_dirty = 1;
+            }
         }
         if (ui_open) {
             if (!gui_menu_shown()) {
@@ -531,6 +564,9 @@ unsigned int soup_ui_keypress(unsigned int key)
         return 0;
     case MODULE_KEY_PRESS_SET:
         ui_req = 2;
+        return 0;
+    case MODULE_KEY_INFO:
+        ui_req = 5;                /* favourite: done on the UI task */
         return 0;
     case MODULE_KEY_TRASH:
     case MODULE_KEY_MENU:
