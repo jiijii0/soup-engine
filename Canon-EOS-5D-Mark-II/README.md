@@ -66,7 +66,7 @@ FILM/100CANON/FLM_1234.JPG    the same photo with the look on it
 | Film-tinted thumbnails | yes: the camera's film files carry a 160×120 thumbnail in the film's look (before, they had none: Canon's thumbnail didn't fit the 8 KB EXIF block). Main image byte-for-byte unchanged (PC) |
 | Film sets ISO | yes: Tri-X 400 → 400, Portra 160 → 160, Portra 800 → 800, Vision3 250D → 250, Kodachrome 64 → 100; an ISO set by hand stays; OFF leaves ISO alone. The picker card used to show FILM SPEED 400 for Portra 160 (its own, older table); both now use `speed.h` |
 | Favourite films | yes: INFO marks and unmarks (`* NAME`), favourites come first and stay first after a restart |
-| Playback toggle (SET in playback) | added, **experimental**: the camera learns where Canon keeps the photo on screen over three or more SET presses in playback. First tries on the camera failed (the folder wasn't found yet after power-on, and 528 photos from another camera in the folder filled the list with look-alikes); now it starts from the newest photo's exact number. Fixed version not yet tried |
+| Playback toggle (SET in playback) | added, **experimental**: the camera learns where Canon keeps the photo on screen over three or more SET presses in playback. yes: learned on the camera in three presses (8672 → 8671 → 8670). 8 words held the newest number; only `0x16044` followed the photos, as a plain file number. SET then showed FLM_8670–8672 in about 3 s each. First tries had failed (the folder wasn't found yet after power-on, and 528 photos from another camera filled the list with look-alikes); it now starts from the newest photo's exact number |
 | Picker on the 4:3 screen | yes: drawn 8/9 as tall to undo the 4:3 panel's squeeze; looks right on the camera |
 
 <br>
