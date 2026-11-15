@@ -56,9 +56,9 @@ FILM/100CANON/FLM_1234.JPG    the same photo with the look on it
 | Develops on a desktop | yes: the module's own `soup_dev.c` (`host_test.c`) on a synthetic 5616×3744 "Canon EOS 5D Mark II" CR2 gives a 2800×1872 film JPEG with Velvia, Portra, Acros and Soup 800; peak memory about 1.5 MB, nothing leaked |
 | Develops a frame on the camera | yes (2026-11-15): a JPEG L shot (5616×3744, 8.2 MB) became `FILM/108_FUJI/FLM_8661.JPG`, 2800×1872, 701 KB, Classic Chrome, in **68 s**, EXIF model and stock name correct. RAW and RAW+JPEG not tried yet |
 | Faster engine | the 7D port's decoder, encoder and look code (see below): byte-identical output on all 21 stocks. On the camera: **45–46 s** a JPEG L frame, Classic Chrome (was 68 s) |
-| Card reads | the source is now read 256 KB at a time (34 card reads for a JPEG L, was about 1,000 of 8 KB), same bytes out. `SOUP.LOG` gives the card's share of each develop (`card: read N ms ...`). Not yet timed on the camera |
-| 36 films | 15 added from the 7D and 6D ports; all 36 develop a real 5D Mark II JPEG L on a PC. Not yet loaded on the camera |
-| Size FULL (5616×3744) | added; on a PC every stock develops at full size, quality 95, 4.9–7.1 MB a file, about 2–2.5 MB of memory, about 3× HALF's time. **Not yet tried on the camera** |
+| Card reads | the source is now read 256 KB at a time (34 card reads for a JPEG L, was about 1,000 of 8 KB), same bytes out. `SOUP.LOG` gives the card's share of each develop. On the camera, with an SD card in a CF adapter: read 0.7 s (40 reads), write 0.3–0.6 s. The card is about 1 s of a frame; the rest is the processor |
+| 36 films | yes: 15 added from the 7D and 6D ports; the camera lists all 36 (`36 stocks` in `SOUP.LOG`) and developed Ektar 100 at HALF and FULL |
+| Size FULL (5616×3744) | yes (2026-11-15): a JPEG L became a 5616×3744, quality 95, 7.8 MB film JPEG (Canon's own JPEG L of the frame: 10.2 MB) in **121 s**, Ektar 100. The frame before, at HALF: **42 s** |
 | Playback toggle (SET in playback) | **off**: needs the 5D2's playback addresses, see below |
 | Picker on the 4:3 screen | expected to work, about 11% narrower than drawn |
 
@@ -76,7 +76,7 @@ Everything the 60D port does, on the 5D Mark II:
 - **RAW, RAW+JPEG and JPEG-only.** From a CR2 it develops the full-size
   JPEG Canon embeds in it (5616×3744), at half size: 2800×1872 (half is 2808 wide; the JPEG encoder trims to a multiple of 16).
 - **Or at full size**, 5616×3744 like Canon's JPEG L, at JPEG quality 95:
-  set **Size** to **FULL**. It takes a few minutes a frame.
+  set **Size** to **FULL**. It takes about 2 minutes a frame.
 - **Only shots taken while Film is on are developed.** Photos already on
   the card are left alone.
 - **Film files live outside DCIM**, so Canon's playback is never confused
@@ -144,8 +144,8 @@ Film** (press **Picture Style** on it to open them): Film on/off, Stock,
 
 | Size | film JPEG | quality | time a frame |
 |:--|:--|:--|:--|
-| **HALF** (default) | 2800×1872 | 88 | about 45 s |
-| **FULL** | 5616×3744, the size of Canon's JPEG L | 95 | a few minutes (not yet timed) |
+| **HALF** (default) | 2800×1872 | 88 | about 42–46 s |
+| **FULL** | 5616×3744, the size of Canon's JPEG L | 95 | about 2 minutes |
 
 FULL uses a bigger memory budget for the glow, so every stock looks the
 same as at HALF, only larger. Leave the camera on until the badge says
@@ -239,11 +239,11 @@ stay where they are. If the camera ever hangs, take the battery out.
 
 ## ⚠️ Known limits
 
-- **FULL hasn't run on a 5D Mark II yet.** It needs about 2–2.5 MB of
-  memory while a frame develops. If the camera can't spare it the frame
-  fails cleanly and `ML/LOGS/SOUP.LOG` says how much memory was free. (On
-  the 6D port, the camera restarted once during a first full-size
-  develop.) Shooting while a FULL frame develops makes both slower.
+- **FULL needs about 2–2.5 MB of memory** while a frame develops. It ran
+  fine on the first 5D Mark II it was tried on; if a camera can't spare
+  it, the frame fails cleanly and `ML/LOGS/SOUP.LOG` says how much memory
+  was free. Shooting while a FULL frame develops makes both slower, and
+  switching off mid-develop leaves the frame for the next start-up.
 - **Photos in a folder another camera made** (say `DCIM/108_FUJI` on a
   card that was in a Fujifilm) are found: the module lists `DCIM` and
   uses the folder with the current number that holds your latest shot.
