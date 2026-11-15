@@ -1,12 +1,12 @@
 <div align="center">
 
-# 🎞️ Soup Engine for the Canon EOS 5D Mark II <sub><sup>work in progress</sup></sub>
+# 🎞️ Soup Engine for the Canon EOS 5D Mark II <sub><sup>beta</sup></sub>
 
 ### Film looks, in the camera, on a Canon EOS 5D Mark II.
 
 <br>
 
-`work in progress` &nbsp;·&nbsp; `GPL v2` &nbsp;·&nbsp; `21 film stocks` &nbsp;·&nbsp; `EOS 5D Mark II` &nbsp;·&nbsp; `firmware 2.1.2`
+`beta` &nbsp;·&nbsp; `GPL v2` &nbsp;·&nbsp; `21 film stocks` &nbsp;·&nbsp; `EOS 5D Mark II` &nbsp;·&nbsp; `firmware 2.1.2`
 
 A community port, adapted from the [60D port](../Canon-EOS-60D) by [@kookueh](https://github.com/kookueh).
 <br>[← All cameras](../README.md#-pick-your-camera)
@@ -15,11 +15,10 @@ A community port, adapted from the [60D port](../Canon-EOS-60D) by [@kookueh](ht
 
 <br>
 
-> 🚧 **Not tested on a camera yet.** This folder is the 60D module moved
-> to the 5D Mark II. It builds against Magic Lantern's 5D Mark II build and
-> develops a test frame on a desktop, but it has not run on a 5D Mark II
-> yet. Don't use it on a shoot you can't repeat. See [Status](#-status)
-> below.
+> 🚧 **Early.** This folder is the 60D module moved to the 5D Mark II.
+> It has developed its first frame on a 5D Mark II (one camera, one
+> owner, JPEG shooting), but it is far from tested. Don't use it on a
+> shoot you can't repeat. See [Status](#-status) below.
 
 <br>
 
@@ -53,9 +52,9 @@ FILM/100CANON/FLM_1234.JPG    the same photo with the look on it
 | Module source | adapted from the 60D module, see [What changed from the 60D port](#-what-changed-from-the-60d-port) |
 | Builds against ML `5D2.212` | yes: `soup.mo` 103,332 bytes; all 84 functions it imports are exported by `5D2.212`; relocations only `R_ARM_ABS32` / `R_ARM_CALL` / `R_ARM_JUMP24`; no `%c` in its strings |
 | Loads on a 5D Mark II | yes, first try (2026-11-15): reads all 21 stocks, finds the CF card as `A:`. Nothing was developed then: Film was left OFF, and the card's folder was `108_FUJI`, which the module couldn't find (fixed since, see below) |
-| Finds the real DCIM folder | fixed after that first try; `dcim_test.c` passes 16 checks, including that card. Not yet run on the camera |
+| Finds the real DCIM folder | yes: `dcim_test.c` passes 16 checks, and on the camera the module found `A:/DCIM/108_FUJI` where Magic Lantern said `108EOS5D` |
 | Develops on a desktop | yes: the module's own `soup_dev.c` (`host_test.c`) on a synthetic 5616×3744 "Canon EOS 5D Mark II" CR2 gives a 2800×1872 film JPEG with Velvia, Portra, Acros and Soup 800; peak memory about 1.5 MB, nothing leaked |
-| Develops a frame on the camera | not yet tried |
+| Develops a frame on the camera | yes (2026-11-15): a JPEG L shot (5616×3744, 8.2 MB) became `FILM/108_FUJI/FLM_8661.JPG`, 2800×1872, 701 KB, Classic Chrome, in **68 s**, EXIF model and stock name correct. RAW and RAW+JPEG not tried yet |
 | Playback toggle (SET in playback) | **off**: needs the 5D2's playback addresses, see below |
 | Picker on the 4:3 screen | expected to work, about 11% narrower than drawn |
 
