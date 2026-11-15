@@ -1,0 +1,11 @@
+soup.mo is built against the official Magic Lantern 5D Mark II build:
+  magiclantern.2025-06-20.5D2.212.zip  (builds.magiclantern.fm/5D2.html)
+  SHA256 not recorded yet: add it once the zip that goes on the test
+  camera has been checked against this commit.
+Commit ed3e7c0dfacfdeaf3349dee73edf9e3621217462
+https://github.com/reticulatedpines/magiclantern_simplified
+
+The same commit the 60D (60D.111) and 50D (50D.109) ports are pinned to.
+Build with that commit checked out, so the module matches the ML on the card.
+The camera must be on Canon firmware 2.1.2, the only 5D2 firmware ML supports.
+Never commit ROM0.BIN / ROM1.BIN: they are Canon's firmware.

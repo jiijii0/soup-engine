@@ -1,0 +1,17 @@
+NAME     TRI-X 400
+RECIPE   Kodak Tri-X 400, mid contrast (X-Trans IV)
+CREDIT   Anders Lindborg, published by Ritchie Roesch / Fuji X Weekly
+SOURCE   https://fujixweekly.com/2020/06/18/fujifilm-x100v-film-simulation-recipe-kodak-tri-x-400
+DESC     GRITTY BLACK AND WHITE, OPEN MIDS, BIG GRAIN
+NOTE     The WB shift (R+9 B-9) acts as a warm contrast filter before the B&W conversion.
+BASE     acros.fs
+WB       DAYLIGHT
+SHIFT    +9 -9
+DR       200
+HIGHLIGHT 0
+SHADOW   +3
+COLOR    0
+CLARITY  +4
+GRAIN    STRONG LARGE
+CCE      STRONG
+CCFXB    OFF
