@@ -1,0 +1,21 @@
+# EXPERIMENTAL. Kodak Vision3 250D: daylight motion picture negative.
+# Low contrast, neutral, enormous latitude, a little red halation as if
+# printed without the remjet.
+VERSION   3
+NAME      VISION3 250D
+DESC      EXPERIMENTAL - CINE DAYLIGHT, LOW CONTRAST
+WB        AS_SHOT
+CURVE     0,18 64,76 128,134 192,192 255,240
+CURVE_R   0,14 128,134 255,246
+CURVE_G   0,14 128,131 255,244
+CURVE_B   0,18 64,76 128,130 192,188 255,240
+SAT       92
+HUE_SAT   100,98,90,104,100,96
+HUE_ROT   2,0,-6,-2,-2,-2
+HUE_LUM   100,102,96,100,98,100
+SPLIT_SH  -6,2,10
+SPLIT_HI  6,4,-4
+HALATION  50 232 18
+HAL_TINT  255,70,30
+GRAIN     16
+GRAIN_SIZE 26

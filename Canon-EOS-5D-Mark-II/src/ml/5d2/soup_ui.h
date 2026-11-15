@@ -2,7 +2,7 @@
 #ifndef SOUP_UI_H
 #define SOUP_UI_H
 
-#define SOUP_UI_MAX 32
+#define SOUP_UI_MAX 48             /* same as FILM_MAX in soup.c */
 
 typedef struct {
     int busy;           /* frames queued or developing          */

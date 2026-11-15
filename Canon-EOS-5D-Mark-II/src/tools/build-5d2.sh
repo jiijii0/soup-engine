@@ -58,6 +58,9 @@ while read -r f; do
         classicchrome) short=cchrome ;;
         classicneg)    short=cneg ;;
         nostalgicneg)  short=nneg ;;
+        5dclassic)     short=5dclassc ;;   # from the 6D port
+        ektachrome)    short=ektachrm ;;   # from the 6D port (ektachr is the 7D's E100)
+        kodachrome)    short=kodachrm ;;   # from the 6D port
         *)             short=$base ;;
     esac
     cp "$SRC/stocks/$f" "$OUT/ML/FILM/$short.fs"

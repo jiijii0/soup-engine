@@ -61,7 +61,7 @@ extern int ml_started;
 
 #define FILM_MIN_CR2   (8u * 1024 * 1024)  /* smaller = still being written */
 #define FILM_MIN_JPG   (512u * 1024)
-#define FILM_MAX       32
+#define FILM_MAX       48   /* 36 ship in ML/FILM; room for your own */
 #define FILM_NAME      32
 #define FILM_PATH      96
 
