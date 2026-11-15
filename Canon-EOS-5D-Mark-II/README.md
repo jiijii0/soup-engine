@@ -52,7 +52,7 @@ FILM/100CANON/FLM_1234.JPG    the same photo with the look on it
 | | |
 |:--|:--|
 | Module source | adapted from the 60D module, see [What changed from the 60D port](#-what-changed-from-the-60d-port) |
-| Builds against ML `5D2.212` | yes: `soup.mo` 123,128 bytes (about 116 KB resident; the 115 KB build started on the camera with no Err 70); all 96 functions it imports are exported by `5D2.212`; relocations only `R_ARM_ABS32` / `R_ARM_CALL` / `R_ARM_JUMP24`; no `%c` in its strings |
+| Builds against ML `5D2.212` | yes: `soup.mo` 123,224 bytes (about 116 KB resident; the 115 KB build started on the camera with no Err 70); all 96 functions it imports are exported by `5D2.212`; relocations only `R_ARM_ABS32` / `R_ARM_CALL` / `R_ARM_JUMP24`; no `%c` in its strings |
 | Loads on a 5D Mark II | yes, first try (2026-11-15): reads all 21 stocks, finds the CF card as `A:`. Nothing was developed then: Film was left OFF, and the card's folder was `108_FUJI`, which the module couldn't find (fixed since, see below) |
 | Finds the real DCIM folder | yes: `dcim_test.c` passes 16 checks, and on the camera the module found `A:/DCIM/108_FUJI` where Magic Lantern said `108EOS5D` |
 | Develops on a desktop | yes: the module's own `soup_dev.c` (`host_test.c`) on a synthetic 5616×3744 "Canon EOS 5D Mark II" CR2 gives a 2800×1872 film JPEG with Velvia, Portra, Acros and Soup 800; peak memory about 1.5 MB, nothing leaked |
@@ -66,7 +66,7 @@ FILM/100CANON/FLM_1234.JPG    the same photo with the look on it
 | Film-tinted thumbnails | yes: the camera's film files carry a 160×120 thumbnail in the film's look (before, they had none: Canon's thumbnail didn't fit the 8 KB EXIF block). Main image byte-for-byte unchanged (PC) |
 | Film sets ISO | yes: Tri-X 400 → 400, Portra 160 → 160, Portra 800 → 800, Vision3 250D → 250, Kodachrome 64 → 100; an ISO set by hand stays; OFF leaves ISO alone. The picker card used to show FILM SPEED 400 for Portra 160 (its own, older table); both now use `speed.h` |
 | Favourite films | yes: INFO marks and unmarks (`* NAME`), favourites come first and stay first after a restart |
-| Playback toggle (SET in playback) | added, **experimental**: the camera learns where Canon keeps the photo on screen over three or more SET presses in playback. yes: learned on the camera in three presses (8672 → 8671 → 8670). 8 words held the newest number; only `0x16044` followed the photos, as a plain file number. SET then showed FLM_8670–8672 in about 3 s each. First tries had failed (the folder wasn't found yet after power-on, and 528 photos from another camera filled the list with look-alikes); it now starts from the newest photo's exact number |
+| Playback toggle (SET in playback) | yes: the address is now built in (`0x16044`, firmware 2.1.2); this build not yet tried on the camera. It was learned on the camera in three presses (8672 → 8671 → 8670). 8 words held the newest number; only `0x16044` followed the photos, as a plain file number. SET then showed FLM_8670–8672 in about 3 s each. First tries had failed (the folder wasn't found yet after power-on, and 528 photos from another camera filled the list with look-alikes); it now starts from the newest photo's exact number |
 | Picker on the 4:3 screen | yes: drawn 8/9 as tall to undo the 4:3 panel's squeeze; looks right on the camera |
 
 <br>
@@ -184,11 +184,16 @@ from the CR2 when the JPEG is M or S. Every film file also carries a
 small thumbnail in the film's look, so file browsers show the film
 version.
 
-### Seeing the film version in playback (experimental)
+### Seeing the film version in playback
 
-In **Play**, with a photo on screen, press **SET**. The first time, the
-camera has to learn where Canon keeps "the photo on screen", which is
-different on every body:
+In **Play**, with a photo on screen, press **SET**: the film version
+appears (about 3 s), with `FILM   SET: ORIGINAL` at the top. **SET**
+again, or any other key, puts Canon's original back, as on the 60D.
+
+Canon keeps "the photo on screen" at `0x16044` on firmware 2.1.2, which
+this camera learned for itself (below) and the module now has built in.
+
+If that address ever reads as no photo at all, the camera learns again:
 
 1. press **Play**: it opens on your **newest** photo. **SET** there:
    `FILM: LEARNING 1 - OLDER PHOTO, THEN SET`
@@ -196,12 +201,9 @@ different on every body:
    before that
 3. when it is sure: `FILM: LEARNED`, and the film version appears
 
-From then on **SET** shows the film version and **SET** again Canon's
-original, as on the 60D. What it learned is kept in `ML/SE.PLY`; delete
-that file to make it learn again. The first press must be on the newest
-photo (`START ON YOUR NEWEST PHOTO` otherwise), and each press on a
-different one. If it says `COULDN'T LEARN`, send `ML/LOGS/SOUP.LOG`:
-every step is logged, so the address can be picked from it by hand.
+What it learns is kept in `ML/SE.PLY` and wins over the built-in address;
+delete that file to go back to it. If it says `COULDN'T LEARN`, send
+`ML/LOGS/SOUP.LOG`: every step is logged.
 
 ### Developing older photos
 
@@ -232,7 +234,7 @@ camera won't switch itself off while anything is developing.
 | `ML/SE.CFG` | Film on/off, the chosen stock, Size and Film sets ISO |
 | `ML/SE.NXT` | where Soup got to, so it can catch up after a restart |
 | `ML/SE.FAV` | your favourite films, one name per line |
-| `ML/SE.PLY` | the playback address the camera learned |
+| `ML/SE.PLY` | a playback address the camera learned (only if the built-in one ever fails) |
 | `ML/LOGS/SOUP.LOG` | one line per develop, with the stock used |
 
 Photo import apps that only look in `DCIM` won't pick up the film files,
@@ -325,14 +327,13 @@ stay where they are. If the camera ever hangs, take the battery out.
   skipped`.
 - **Firmware 2.1.2 only**, because that's the only firmware Magic Lantern
   supports on the 5D Mark II.
-- **The playback toggle learns its address on the camera.** It looks for
-  a value in Canon's memory that holds the newest photo's number, then
-  keeps the one that follows you to older photos; the 60D's two addresses, found in
-  [qemu-eos](https://github.com/reticulatedpines/qemu-eos), don't apply to
-  the 5D Mark II. It reads memory only. A wrong guess would show the wrong
-  film version (any key puts Canon's picture back): delete `ML/SE.PLY` and
-  send `SOUP.LOG`. An address found for certain can be fixed in
-  `soup_play_current()` in [`src/ml/5d2/soup.c`](src/ml/5d2/soup.c).
+- **The playback address was learned on one camera.** `0x16044` came from
+  a 5D Mark II on 2.1.2 learning it (the 60D's two addresses, found in
+  [qemu-eos](https://github.com/reticulatedpines/qemu-eos), don't apply).
+  The same firmware should keep it at the same place on every body, but
+  it hasn't been checked in qemu-eos. It reads memory only; a wrong photo
+  would show the wrong film version (any key puts Canon's picture back).
+  It is `SOUP_PLAY_FILE_212` in [`src/ml/5d2/soup.c`](src/ml/5d2/soup.c).
 - **The module is about 116 KB resident.** On the 7D port, growing past
   about 119 KB risked Err 70 at start-up. The 115 KB build started fine on
   a 5D Mark II; if a later one gives Err 70, go back to the previous
@@ -361,7 +362,7 @@ stay where they are. If the camera ever hangs, take the battery out.
 | `src/ml/5d2/soup.c`, `soup_dev.c`, `host_test.c` | RAW+JPEG develops the JPEG L when it is at least the CR2 preview's size (`host_test --pick`); the film file's EXIF thumbnail is the source's thumbnail through the film's look, after the 7D port's `graded_thumb` |
 | `src/ml/5d2/soup.c`, `soup_iso.h` | Film sets ISO, after the 6D port: box speed from the film name or a table, clamped to 100–6400, set only on loading a film, P/Tv/Av/M only |
 | `src/engine/speed.h`, `ui.c` | one box-speed table for the picker card's FILM SPEED band and Film sets ISO: the card used to show 400 for Portra 160 and 800, and 200 for most of the added films. 5D Classic's card says DIGITAL |
-| `src/ml/5d2/soup.c`, `soup_ui.c` | favourite films first (INFO in the picker, `ML/SE.FAV`); playback toggle with an on-camera learned address (`ML/SE.PLY`); the picker drawn 8/9 as tall for the 4:3 panel |
+| `src/ml/5d2/soup.c`, `soup_ui.c` | favourite films first (INFO in the picker, `ML/SE.FAV`); playback toggle at `0x16044`, learned on the camera and built in (relearned into `ML/SE.PLY` only if it fails); the picker drawn 8/9 as tall for the 4:3 panel |
 | `src/ml/5d2/soup_ui.c` | the playback log line no longer reads the 60D's addresses; notes on SET (C.Fn IV-3) and the 4:3 screen |
 | `src/ml/5d2/soup_dev.c` | EXIF model fallback is `Canon EOS 5D Mark II` |
 | `src/ml/5d2/ML-PIN.txt`, `Makefile`, `README.rst` | 5D2.212 |

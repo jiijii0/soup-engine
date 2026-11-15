@@ -571,14 +571,18 @@ void soup_flm_path(int num, char *out, int n)
  *   0x59B74  folder << 16 | file   (e.g. 100 << 16 | 2278)
  *   0x2A194  file
  *
- * 5D Mark II 2.1.2: not known in advance. Firmware addresses differ per
- * body, so the 60D's must never be read here; the two below stay 0 until
- * someone finds the 5D2's (in qemu-eos with a ROM dump, as the 60D did).
- * Instead the camera learns the address itself: see soup_play_learn.
- * Reading memory changes nothing.
+ * 5D Mark II 2.1.2: firmware addresses differ per body, so the 60D's must
+ * never be read here, and no packed folder|file word is known (the two
+ * below stay 0). The camera learned this one itself (soup_play_learn) on
+ * 2026-11-15: of 8 words holding the newest frame, only 0x16044 followed
+ * playback, 8672 -> 8671 -> 8670, as a plain file number, and SET then
+ * showed the right film files. It is the default; an address learned
+ * into ML/SE.PLY still wins, and learning starts again only if this one
+ * ever reads as no frame at all. Reading memory changes nothing.
  */
-#define SOUP_PLAY_FOLDER_FILE 0x0   /* folder << 16 | file, 5D2 2.1.2: unknown */
-#define SOUP_PLAY_FILE        0x0   /* file,                5D2 2.1.2: unknown */
+#define SOUP_PLAY_FOLDER_FILE 0x0      /* folder << 16 | file, 5D2 2.1.2: none known */
+#define SOUP_PLAY_FILE        0x0      /* (pair with the above)                        */
+#define SOUP_PLAY_FILE_212    0x16044  /* file, 5D2 2.1.2: learned on the camera       */
 
 int soup_list_frames(uint8_t *bits);
 
@@ -818,14 +822,17 @@ int soup_play_current(int *folder, int *num)
         *num = (int)b;
         return 0;
     }
-    if (!play_addr) return -1;
-    a = *(volatile uint32_t *)play_addr;
-    if (play_packed) {
+    a = *(volatile uint32_t *)(play_addr ? play_addr : SOUP_PLAY_FILE_212);
+    if (play_addr && play_packed) {
         if ((a >> 16) < 100 || (a >> 16) > 999 || (a & 0xFFFF) < 1 || (a & 0xFFFF) > 9999) return -1;
         *folder = (int)(a >> 16);
         *num = (int)(a & 0xFFFF);
     } else {
+        struct card_info *card = get_shooting_card();
         if (a < 1 || a > 9999) return -1;
+        /* the folder really on the card: right after power-on nothing has
+         * been developed yet, and ML's guess (108EOS5D) has no FILM twin */
+        if (card) soup_dcim_refresh(card->folder_number, card->file_number);
         *folder = soup_folder_now();
         *num = (int)a;
     }
@@ -1182,7 +1189,8 @@ static void soup_task(void *unused)
         struct card_info *c = get_shooting_card();
         soup_log("soup.mo started, %d stocks, film %s, file number %d, ML dir %s, playback address %x%s",
                  film_count, film_on ? "ON" : "OFF", c ? c->file_number : -1, get_dcim_dir(),
-                 (unsigned)play_addr, play_addr ? (play_packed ? " (folder|file)" : " (file)") : " (not learned)");
+                 (unsigned)(play_addr ? play_addr : SOUP_PLAY_FILE_212),
+                 play_addr ? (play_packed ? " (learned, folder|file)" : " (learned, file)") : " (built in, file)");
     }
 
     for (;;) {
