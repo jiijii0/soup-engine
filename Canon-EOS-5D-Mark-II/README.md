@@ -50,13 +50,14 @@ FILM/100CANON/FLM_1234.JPG    the same photo with the look on it
 | | |
 |:--|:--|
 | Module source | adapted from the 60D module, see [What changed from the 60D port](#-what-changed-from-the-60d-port) |
-| Builds against ML `5D2.212` | yes: `soup.mo` 108,532 bytes; all 86 functions it imports are exported by `5D2.212`; relocations only `R_ARM_ABS32` / `R_ARM_CALL` / `R_ARM_JUMP24`; no `%c` in its strings |
+| Builds against ML `5D2.212` | yes: `soup.mo` 112,288 bytes; all 88 functions it imports are exported by `5D2.212`; relocations only `R_ARM_ABS32` / `R_ARM_CALL` / `R_ARM_JUMP24`; no `%c` in its strings |
 | Loads on a 5D Mark II | yes, first try (2026-11-15): reads all 21 stocks, finds the CF card as `A:`. Nothing was developed then: Film was left OFF, and the card's folder was `108_FUJI`, which the module couldn't find (fixed since, see below) |
 | Finds the real DCIM folder | yes: `dcim_test.c` passes 16 checks, and on the camera the module found `A:/DCIM/108_FUJI` where Magic Lantern said `108EOS5D` |
 | Develops on a desktop | yes: the module's own `soup_dev.c` (`host_test.c`) on a synthetic 5616×3744 "Canon EOS 5D Mark II" CR2 gives a 2800×1872 film JPEG with Velvia, Portra, Acros and Soup 800; peak memory about 1.5 MB, nothing leaked |
 | Develops a frame on the camera | yes (2026-11-15): a JPEG L shot (5616×3744, 8.2 MB) became `FILM/108_FUJI/FLM_8661.JPG`, 2800×1872, 701 KB, Classic Chrome, in **68 s**, EXIF model and stock name correct. RAW and RAW+JPEG not tried yet |
 | Faster engine | the 7D port's decoder, encoder and look code (see below): byte-identical output on all 21 stocks. On the camera: **45–46 s** a JPEG L frame, Classic Chrome (was 68 s) |
 | Card reads | the source is now read 256 KB at a time (34 card reads for a JPEG L, was about 1,000 of 8 KB), same bytes out. `SOUP.LOG` gives the card's share of each develop. On the camera, with an SD card in a CF adapter: read 0.7 s (40 reads), write 0.3–0.6 s. The card is about 1 s of a frame; the rest is the processor |
+| Develop older photos | added: LAST 1 / 5 / 20 or the whole folder, skip or replace existing film versions; no auto power-off while developing. Builds clean; filename parsing tested on a PC (`dcim_test.c`). **Not yet tried on the camera** |
 | 36 films | yes: 15 added from the 7D and 6D ports; the camera lists all 36 (`36 stocks` in `SOUP.LOG`) and developed Ektar 100 at HALF and FULL |
 | Size FULL (5616×3744) | yes (2026-11-15): a JPEG L became a 5616×3744, quality 95, 7.8 MB film JPEG (Canon's own JPEG L of the frame: 10.2 MB) in **121 s**, Ektar 100. The frame before, at HALF: **42 s** |
 | Playback toggle (SET in playback) | **off**: needs the 5D2's playback addresses, see below |
@@ -155,6 +156,26 @@ While a frame develops, a badge at the top right of the shooting screen
 shows progress (**+2** means two more frames are waiting), then **FILM
 DONE** or **FILM FAILED** for a moment.
 
+### Developing older photos
+
+Photos already on the card can get a film version too: frames shot with
+Film off, from before the module was installed, or with a film you have
+since changed your mind about. In **Shoot → Soup Film** (press **Picture
+Style** on it):
+
+| setting | what it does |
+|:--|:--|
+| **Older photos** | `LAST 1`, `LAST 5`, `LAST 20`, or `WHOLE FOLDER`: the camera's current folder |
+| **Replace existing** | `OFF` (default) skips photos that already have a film version. `ON` develops them again with the film chosen now, and swaps the film file only once the new one is complete |
+| **Develop older** | **SET** starts, **SET** again stops. Shows `12 of 20`, then `done: ...` |
+
+It uses the **Stock** and **Size** chosen above, and works with Film on or
+off. New shots always go first: the job waits while a fresh frame
+develops. The badge shows progress as usual. Your photos are never
+changed, only `FILM/...` files are written. At HALF a frame takes about
+45 s, at FULL about 2 minutes, so `WHOLE FOLDER` can run for hours. The
+camera won't switch itself off while anything is developing.
+
 ### What lands on the card
 
 | File | What it is |
@@ -239,6 +260,9 @@ stay where they are. If the camera ever hangs, take the battery out.
 
 ## ⚠️ Known limits
 
+- **Develop older works in the camera's current folder only** (the one
+  new shots go to). It lists that folder once when it starts. Frames are
+  found by number, so a photo renamed on a computer is not seen.
 - **FULL needs about 2–2.5 MB of memory** while a frame develops. It ran
   fine on the first 5D Mark II it was tried on; if a camera can't spare
   it, the frame fails cleanly and `ML/LOGS/SOUP.LOG` says how much memory
@@ -281,6 +305,7 @@ stay where they are. If the camera ever hangs, take the battery out.
 | `src/ml/5d2/soup.c`, `soup_dev.c`, `soup_dev.h`, `host_test.c` | Size HALF / FULL (saved in `ML/SE.CFG` as `SIZE`); FULL decodes at full scale, quality 95, with a 1 MB look budget so no stock's glow is cut, and 768 KB scratch for 4:2:0 previews; a develop that runs out of memory logs how much was free; the help line names Picture Style, the 5D2's submenu button |
 | `src/stocks/`, `card/ML/FILM/`, `src/tools/build-5d2.sh` | fifteen more films: twelve from the 7D port, three from the 6D port (`5dclassic`, `ektachrome`, `kodachrome`, shortened to 8.3 by the build). Each develops a real 5D Mark II JPEG L at HALF, and the heaviest at FULL, on a PC |
 | `src/ml/5d2/soup.c`, `soup_ui.h` | up to 48 films (was 32) |
+| `src/ml/5d2/soup.c`, `soup_dcim.h`, `dcim_test.c` | Develop older: a job (last 1/5/20 frames or every photo in the folder) run frame by frame when no new shot is waiting, with Replace existing; one shared develop function for new and older frames; ML's `powersave_prohibit()` held while anything develops, as the 7D does, so auto power-off can't cut a FULL develop short |
 | `src/ml/5d2/soup_ui.c` | the playback log line no longer reads the 60D's addresses; notes on SET (C.Fn IV-3) and the 4:3 screen |
 | `src/ml/5d2/soup_dev.c` | EXIF model fallback is `Canon EOS 5D Mark II` |
 | `src/ml/5d2/ML-PIN.txt`, `Makefile`, `README.rst` | 5D2.212 |

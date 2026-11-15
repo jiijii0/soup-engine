@@ -44,6 +44,7 @@
 #include <shoot.h>
 #include <lens.h>
 #include <propvalues.h>
+#include <powersave.h>
 
 #include "se.h"
 #include "cr2.h"
@@ -570,8 +571,17 @@ static int soup_settled(const char *path, uint32_t min)
     return now - settle_since >= FILM_SETTLE_MS;
 }
 
-/* 1 = this number is settled, 0 = not ready yet, -1 = failed. */
-static int soup_one(int num, int current)
+/*
+ * One frame. `how` is FRAME_LIVE for a shot just taken, or FRAME_OLDER
+ * (optionally | FRAME_REPLACE) for "Develop older".
+ * Returns 1 developed, 2 skipped (already has a film version, or no such
+ * frame), 0 not ready yet (still being written), -1 failed.
+ */
+#define FRAME_LIVE    0
+#define FRAME_OLDER   1
+#define FRAME_REPLACE 2
+
+static int soup_frame(int num, int current, int how)
 {
     char cr2[FILM_PATH], jpg[FILM_PATH], flm[FILM_PATH], tmp[FILM_PATH];
     const char *src;
@@ -579,7 +589,7 @@ static int soup_one(int num, int current)
     int is_cr2, t0, rc;
 
     soup_paths(num, cr2, jpg, flm, tmp, FILM_PATH);
-    if (is_file(flm)) return 1;
+    if (is_file(flm) && !(how & FRAME_REPLACE)) return 2;
 
     if (is_file(cr2)) {
         if (!soup_settled(cr2, FILM_MIN_CR2)) return 0;
@@ -592,8 +602,9 @@ static int soup_one(int num, int current)
          * later frame exists. Say so: a wrong folder looked exactly like
          * this, and skipped every frame without a word. */
         if (is_file(tmp)) FIO_RemoveFile(tmp);
+        if (how & FRAME_OLDER) return 2;
         if (num < current) soup_log("%04d: no CR2 or JPG in %s, skipped", num, soup_dcim_dir());
-        return num < current ? 1 : 0;
+        return num < current ? 2 : 0;
     }
 
     /* Do not compete with the camera for the card mid-burst. */
@@ -626,11 +637,14 @@ static int soup_one(int num, int current)
                       soup_progress_cb);
     film_last_secs = (get_ms_clock() - t0) / 1000;
 
+    /* Replacing: the old film version goes only once the new one is
+     * complete, so a failed redo leaves it where it was. */
+    if (rc == SE_OK && is_file(tmp) && is_file(flm)) FIO_RemoveFile(flm);
     if (rc == SE_OK && is_file(tmp) && FIO_RenameFile(tmp, flm) == 0 && is_file(flm)) {
         film_done_count++;
         snprintf(film_status, sizeof(film_status), "FLM_%04d done, %ds", num, film_last_secs);
-        soup_log("FLM_%04d.JPG done in %d s (%s, %s)", num, film_last_secs, stock.name,
-                 film_size ? "FULL" : "HALF");
+        soup_log("FLM_%04d.JPG done in %d s (%s, %s%s)", num, film_last_secs, stock.name,
+                 film_size ? "FULL" : "HALF", (how & FRAME_OLDER) ? ", older photo" : "");
         film_batch_done++;
         film_event = 1;
         return 1;
@@ -657,6 +671,150 @@ static int soup_one(int num, int current)
  * file, which on a fresh install meant developing the old shots.)
  */
 #define FILM_RESUME 3
+
+/* ------------------------------------------------- develop older ---- */
+
+/*
+ * "Develop older": photos already on the card, in the current camera
+ * folder, with the film and Size chosen now -- the frames shot with Film
+ * off, before the module was installed, or with the wrong film.
+ *
+ * Started and stopped from the menu (job_req); run by the develop task one
+ * frame at a time, and only when no new shot is waiting, so shooting
+ * always comes first. The photos themselves are never changed. With
+ * "Replace existing" OFF, a frame that already has a film version is
+ * skipped; ON develops it again and swaps the film file once the new one
+ * is complete.
+ */
+static volatile int job_req;            /* menu: 1 start, 2 stop           */
+static int job_scope;                   /* menu: LAST 1 / 5 / 20 / FOLDER  */
+static int job_replace;                 /* menu: 0 skip, 1 redo            */
+static int job_active, job_pos, job_total, job_dev, job_skip, job_fail, job_tries;
+static int job_t0;
+static uint8_t job_bits[(9999 + 8) / 8];/* frame numbers to visit           */
+static char job_status[48] = "SET to start";
+
+#define JOB_BIT(n)     (job_bits[(n) >> 3] & (1 << ((n) & 7)))
+#define JOB_SET(n)     (job_bits[(n) >> 3] |= (uint8_t)(1 << ((n) & 7)))
+
+/* Every IMG_nnnn.JPG / .CR2 in the camera folder. Listed once, at start. */
+static int soup_job_list_folder(void)
+{
+    char dir[FILM_PATH];
+    struct fio_file *f;
+    struct fio_dirent *d;
+    int n = 0;
+
+    snprintf(dir, sizeof(dir), "%s/", soup_dcim_dir());
+    f = alloc_fio_file();
+    if (!f) return 0;
+    d = FIO_FindFirstEx(dir, f);
+    if (!IS_ERROR(d)) {
+        do {
+            struct file_info fi = convert_fio_file_info(f);
+            int num;
+            if (fi.mode & ATTR_DIRECTORY) continue;
+            num = soup_frame_number(fi.name);
+            if (num > 0 && !JOB_BIT(num)) { JOB_SET(num); n++; }
+        } while (FIO_FindNextEx(d, f) == 0);
+        FIO_FindClose(d);
+    }
+    free(f);
+    return n;
+}
+
+static void soup_job_start(struct card_info *card, int current)
+{
+    static const int last[3] = { 1, 5, 20 };
+    int k;
+
+    memset(job_bits, 0, sizeof(job_bits));
+    job_total = 0;
+    if (card) soup_dcim_refresh(card->folder_number, current);
+    if (job_scope >= 0 && job_scope < 3) {
+        for (k = current - last[job_scope] + 1; k <= current; k++)
+            if (k >= 1 && k <= 9999) { JOB_SET(k); job_total++; }
+    } else {
+        job_total = soup_job_list_folder();
+    }
+    if (job_total == 0) {
+        snprintf(job_status, sizeof(job_status), "no photos found");
+        soup_log("older photos: none found in %s", soup_dcim_dir());
+        return;
+    }
+    job_active = 1;
+    job_pos = 1;
+    job_dev = job_skip = job_fail = job_tries = 0;
+    job_t0 = get_ms_clock();
+    film_busy = 1;
+    film_pct = 0;
+    film_batch_done = 0;
+    film_batch_total = job_total;
+    film_batch_t0 = job_t0;
+    snprintf(job_status, sizeof(job_status), "0 of %d", job_total);
+    soup_log("older photos: %d to visit in %s, %s, %s, replace %s", job_total,
+             soup_dcim_dir(), film_names[film_stock], film_size ? "FULL" : "HALF",
+             job_replace ? "ON" : "OFF");
+}
+
+static void soup_job_finish(const char *why)
+{
+    int secs = (get_ms_clock() - job_t0 + 500) / 1000;
+    job_active = 0;
+    film_busy = 0;
+    film_batch_secs = secs;
+    film_event = job_fail ? 2 : 1;
+    snprintf(job_status, sizeof(job_status), "%s: %d new, %d skipped%s",
+             why, job_dev, job_skip, job_fail ? ", some failed" : "");
+    soup_log("older photos %s: %d developed, %d skipped, %d failed, %d s",
+             why, job_dev, job_skip, job_fail, secs);
+}
+
+/* One frame of the job. */
+static void soup_job_step(int current)
+{
+    int rc;
+
+    while (job_pos <= 9999 && !JOB_BIT(job_pos)) job_pos++;
+    if (job_pos > 9999) { soup_job_finish("done"); return; }
+
+    rc = soup_frame(job_pos, current, FRAME_OLDER | (job_replace ? FRAME_REPLACE : 0));
+    if (rc == 0) { msleep(500); return; }           /* still being written */
+    if (rc < 0 && ++job_tries < 2) { msleep(2000); return; }
+    if (rc == 1) job_dev++;
+    else if (rc == 2) job_skip++;
+    else job_fail++;
+    job_tries = 0;
+    job_pos++;
+
+    film_busy = 1;
+    film_batch_total = job_total;
+    film_batch_done = job_dev + job_skip + job_fail;
+    snprintf(job_status, sizeof(job_status), "%d of %d", film_batch_done, job_total);
+}
+
+/* Requests from the menu, handled on the develop task. */
+static void soup_job_poll(struct card_info *card, int current)
+{
+    int r = job_req;
+    if (!r) return;
+    job_req = 0;
+    if (r == 1 && !job_active && current > 0) soup_job_start(card, current);
+    else if (r == 2 && job_active) soup_job_finish("stopped");
+}
+
+/* No auto power-off while anything is developing: a FULL frame takes two
+ * minutes and a folder can take hours. ML's calls set a property, they do
+ * not nest, so the hold is taken once and given back once. */
+static int soup_power_held;
+
+static void soup_power_update(void)
+{
+    int want = film_busy || job_active;
+    if (want == soup_power_held) return;
+    if (want) powersave_prohibit(); else powersave_permit();
+    soup_power_held = want;
+}
 
 static int soup_start_point(int current, int at_boot)
 {
@@ -689,15 +847,22 @@ static void soup_task(void *unused)
 
         card = get_shooting_card();
         current = card ? card->file_number : 0;
+        soup_power_update();
+        soup_job_poll(card, current);
 
         if (!film_on) {
-            film_busy = 0;
-            /* OFF leaves every file alone, including ones still queued */
+            /* OFF leaves every new shot alone, including ones still queued.
+             * "Develop older" still runs: it was asked for by hand. */
             if (was_on && current > 0) soup_next_save(current);
             was_on = 0;
             boot = 0;
             cursor = -1;
             snprintf(film_status, sizeof(film_status), "off");
+            if (job_active && !is_movie_mode() && current > 0) {
+                soup_job_step(current);
+                continue;
+            }
+            film_busy = 0;
             msleep(500);
             continue;
         }
@@ -710,6 +875,11 @@ static void soup_task(void *unused)
         }
         was_on = 1;
         if (cursor >= current) {
+            /* no new shot waiting: the older-photo job's turn */
+            if (job_active) {
+                soup_job_step(current);
+                continue;
+            }
             if (!fails) snprintf(film_status, sizeof(film_status), "idle, %d done", film_done_count);
             if (film_busy)
                 film_batch_secs = (get_ms_clock() - film_batch_t0 + 500) / 1000;
@@ -733,7 +903,8 @@ static void soup_task(void *unused)
         /* which DCIM folder the frames are really in (cheap after the
          * first time; lists DCIM only when the folder number changes) */
         soup_dcim_refresh(card->folder_number, current);
-        rc = soup_one(cursor + 1, current);
+        rc = soup_frame(cursor + 1, current, FRAME_LIVE);
+        if (rc == 2) rc = 1;            /* nothing to do for it: settled */
         if (rc > 0) {
             cursor++;
             fails = 0;
@@ -820,6 +991,17 @@ static MENU_UPDATE_FUNC(soup_main_update)
         MENU_SET_VALUE("ON, %s%s", film_names[film_stock], film_size ? ", FULL" : "");
 }
 
+static MENU_SELECT_FUNC(soup_job_select)
+{
+    job_req = job_active ? 2 : 1;
+}
+
+static MENU_UPDATE_FUNC(soup_job_update)
+{
+    MENU_SET_VALUE("%s", job_status);
+    if (job_active) MENU_SET_RINFO("SET: stop");
+}
+
 static MENU_UPDATE_FUNC(soup_status_update)
 {
     MENU_SET_VALUE("%s", film_status);
@@ -862,6 +1044,30 @@ static struct menu_entry soup_menu[] = {
                 .update = soup_save_update,
                 .help   = "HALF: 2800x1872, about 45 s a frame.",
                 .help2  = "FULL: 5616x3744 like Canon's JPEG L, quality 95, minutes.",
+            },
+            {
+                .name   = "Older photos",
+                .priv   = &job_scope,
+                .max    = 3,
+                .choices = CHOICES("LAST 1", "LAST 5", "LAST 20", "WHOLE FOLDER"),
+                .help   = "Photos already on the card, in the camera's current folder,",
+                .help2  = "for Develop older. Uses the Stock and Size above.",
+            },
+            {
+                .name   = "Replace existing",
+                .priv   = &job_replace,
+                .max    = 1,
+                .choices = CHOICES("OFF", "ON"),
+                .help   = "OFF: skip photos that already have a film version.",
+                .help2  = "ON: develop them again, replacing the film file.",
+            },
+            {
+                .name   = "Develop older",
+                .select = soup_job_select,
+                .update = soup_job_update,
+                .icon_type = IT_ACTION,
+                .help   = "SET: start, SET again: stop. New shots go first.",
+                .help2  = "Your photos are never changed. Log: ML/LOGS/SOUP.LOG.",
             },
             {
                 .name   = "Status",

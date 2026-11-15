@@ -51,4 +51,25 @@ static int soup_dcim_pick(const char *const *names, int count, int folder,
     return canon >= 0 ? canon : first;
 }
 
+/* The frame number of a camera file, "IMG_1234.JPG" or "IMG_1234.CR2"
+ * (any four-character prefix, extension in either case) -> 1234. Returns
+ * 0 for anything else, including numbers outside 1..9999. Used to list
+ * the photos in a folder for "Develop older". */
+static int soup_frame_number(const char *name)
+{
+    int i, n = 0;
+    char e0, e1, e2;
+    for (i = 0; name[i]; i++) ;
+    if (i != 12 || name[8] != '.') return 0;
+    for (i = 4; i < 8; i++) {
+        if (name[i] < '0' || name[i] > '9') return 0;
+        n = n * 10 + (name[i] - '0');
+    }
+    e0 = name[9]  & ~32; e1 = name[10] & ~32; e2 = name[11] & ~32;   /* upper case */
+    if (!((e0 == 'J' && e1 == 'P' && e2 == 'G') ||
+          (e0 == 'C' && e1 == 'R' && name[11] == '2')))
+        return 0;
+    return n;
+}
+
 #endif

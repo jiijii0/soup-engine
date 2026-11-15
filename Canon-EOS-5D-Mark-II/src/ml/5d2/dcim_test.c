@@ -65,6 +65,23 @@ int main(void)
     match("10A_FUJI", 108, 0);
     match("099CANON", 99, 0);
 
+    {
+        static const struct { const char *name; int want; } fn[] = {
+            { "IMG_8661.JPG", 8661 }, { "IMG_0001.CR2", 1 }, { "_MG_1234.JPG", 1234 },
+            { "img_0042.jpg", 42 },   { "IMG_9999.cr2", 9999 },
+            { "IMG_0000.JPG", 0 },    { "IMG_866.JPG", 0 },  { "IMG_8661.THM", 0 },
+            { "IMG_86a1.JPG", 0 },    { "FLM_8661.TMP", 0 }, { "IMG_8661.JPEG", 0 },
+            { "IMG_8661JPG.", 0 },    { "MVI_1234.MOV", 0 },
+        };
+        unsigned i;
+        for (i = 0; i < sizeof fn / sizeof fn[0]; i++) {
+            int got = soup_frame_number(fn[i].name);
+            checks++;
+            if (got != fn[i].want) { fails++; printf("FAIL frame_number(%s) = %d, want %d\n", fn[i].name, got, fn[i].want); }
+        }
+        printf("ok   frame numbers from file names (%u cases)\n", (unsigned)(sizeof fn / sizeof fn[0]));
+    }
+
     printf("%d checks, %d failed\n", checks, fails);
     return fails ? 1 : 0;
 }
