@@ -11,6 +11,8 @@
 A community port, adapted from the [60D port](../Canon-EOS-60D) by [@kookueh](https://github.com/kookueh).
 <br>[← All cameras](../README.md#-pick-your-camera)
 
+### 📦 [Download Canon-EOS-5D-Mark-II.zip](https://github.com/jiijii0/soup-engine/releases/download/folders/Canon-EOS-5D-Mark-II.zip)
+
 </div>
 
 <br>
