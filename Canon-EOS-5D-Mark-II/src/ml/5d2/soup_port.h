@@ -25,6 +25,8 @@ static inline int   FIO_ReadFile(FILE *f, void *b, size_t n) { return (int)fread
 static inline int   FIO_WriteFile(FILE *f, const void *b, size_t n) { return (int)fwrite(b, 1, n, f); }
 static inline long long FIO_SeekSkipFile(FILE *f, long long off, int whence) { return fseek(f, (long)off, whence) ? -1 : off; }
 static inline int   FIO_GetFileSize(const char *p, uint32_t *sz) { struct stat st; if (stat(p, &st)) return -1; *sz = (uint32_t)st.st_size; return 0; }
+#  include <time.h>
+static inline int   get_ms_clock(void) { return (int)(clock() * 1000.0 / CLOCKS_PER_SEC); }
 /* Count what the develop asks for, so the test can report the peak. */
 extern size_t soup_host_live, soup_host_peak;
 static inline void *soup_host_alloc(size_t n) { size_t *p = malloc(n + 16); if (!p) return 0; p[0] = n; soup_host_live += n; if (soup_host_live > soup_host_peak) soup_host_peak = soup_host_live; return (char *)p + 16; }

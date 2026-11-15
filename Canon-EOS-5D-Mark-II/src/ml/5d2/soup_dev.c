@@ -17,12 +17,17 @@
 #include "jpeg_dec.h"
 #include "jpeg_enc.h"
 
+/* Time spent waiting on the card during one develop, for the log line:
+ * is a frame slow because of the processor or because of the card? */
+static int soup_rd_ms, soup_rd_calls, soup_wr_ms, soup_wr_calls;
+
 /* Read [off, off+n) of an open file into `dst` (cacheable), through a DMA
  * bounce buffer. */
 static int soup_read_at(FILE *h, uint32_t off, uint8_t *dst, uint32_t n,
                         uint8_t *dma, uint32_t dmacap)
 {
     uint32_t done = 0;
+    int t0 = get_ms_clock();
     if (FIO_SeekSkipFile(h, off, SEEK_SET) < 0) return -1;
     while (done < n) {
         uint32_t want = n - done;
@@ -32,19 +37,67 @@ static int soup_read_at(FILE *h, uint32_t off, uint8_t *dst, uint32_t n,
         if (k <= 0) return -1;
         memcpy(dst + done, dma, (size_t)k);
         done += (uint32_t)k;
+        soup_rd_calls++;
     }
+    soup_rd_ms += get_ms_clock() - t0;
     return 0;
 }
 
 /* ---------------------------------------------------------- develop ---- */
 
-/* Feeds the streaming decoder: offsets are relative to the JPEG start. */
-typedef struct { FILE *h; uint32_t base; uint8_t *dma; uint32_t dmacap; } soup_stream;
+/*
+ * Feeds the streaming decoder: offsets are relative to the JPEG start.
+ *
+ * The decoder asks for 8 KB at a time. Read one by one, that was a seek and
+ * a card read per 8 KB, about a thousand for a 5D Mark II JPEG L -- slow on
+ * a slow card (an SD card in a CF adapter, say). So the DMA buffer doubles
+ * as a read-ahead: it is filled `dmacap` bytes at a time (256 KB, ~33 reads
+ * a frame) and requests are served from it. Same bytes either way.
+ */
+typedef struct {
+    FILE    *h;
+    uint32_t base, total;              /* JPEG start in the file, its length */
+    uint8_t *dma;
+    uint32_t dmacap;
+    uint32_t coff, clen;               /* what the buffer holds: [coff, +clen) */
+} soup_stream;
 
 static int soup_stream_read(void *ctx, uint32_t off, void *dst, uint32_t n)
 {
     soup_stream *s = (soup_stream *)ctx;
-    return soup_read_at(s->h, s->base + off, (uint8_t *)dst, n, s->dma, s->dmacap);
+    uint8_t *d = (uint8_t *)dst;
+    while (n) {
+        if (s->clen && off >= s->coff && off < s->coff + s->clen) {
+            uint32_t k = s->coff + s->clen - off;
+            if (k > n) k = n;
+            memcpy(d, s->dma + (off - s->coff), k);
+            d += k; off += k; n -= k;
+            continue;
+        }
+        {
+            /* refill from `off`, as much as the buffer holds or the JPEG has */
+            uint32_t want = s->dmacap, done = 0;
+            int t0 = get_ms_clock();
+            if (s->total) {
+                if (off >= s->total) return -1;
+                if (want > s->total - off) want = s->total - off;
+            }
+            s->clen = 0;
+            if (FIO_SeekSkipFile(s->h, s->base + off, SEEK_SET) < 0) return -1;
+            while (done < want) {
+                int k = FIO_ReadFile(s->h, s->dma + done, want - done);
+                soup_rd_calls++;
+                if (k <= 0) break;
+                done += (uint32_t)k;
+            }
+            soup_rd_ms += get_ms_clock() - t0;
+            if (done < n && done < want) return -1;   /* short read we needed */
+            if (!done) return -1;
+            s->coff = off;
+            s->clen = done;
+        }
+    }
+    return 0;
 }
 
 /* Can this JPEG be streamed? Needs no DRI (restart markers), and every
@@ -82,9 +135,13 @@ typedef struct {
 
 static int soup_out_flush(soup_out *o)
 {
-    int n = o->len;
+    int n = o->len, t0, w;
     if (!n || o->err) return o->err ? -1 : 0;
-    if (FIO_WriteFile(o->h, o->buf[o->cur], (size_t)n) != n) {
+    t0 = get_ms_clock();
+    w = FIO_WriteFile(o->h, o->buf[o->cur], (size_t)n);
+    soup_wr_ms += get_ms_clock() - t0;
+    soup_wr_calls++;
+    if (w != n) {
         o->err = 1;
         return -1;
     }
@@ -219,6 +276,7 @@ int soup_develop(const char *src, int is_cr2, const char *tmp,
     memset(&out, 0, sizeof out);
     memset(&L, 0, sizeof L);
     memset(&info, 0, sizeof info);
+    soup_rd_ms = soup_rd_calls = soup_wr_ms = soup_wr_calls = 0;
 
     /* --- find the JPEG to develop ------------------------------------- */
     if (FIO_GetFileSize(src, &fsize) != 0 || fsize == 0) return SE_E_IO;
@@ -328,7 +386,8 @@ int soup_develop(const char *src, int is_cr2, const char *tmp,
     se_set_progress(progress, 0);
     if (stream) {
         soup_stream sr;
-        sr.h = h; sr.base = poff; sr.dma = dma; sr.dmacap = FILM_HDR;
+        memset(&sr, 0, sizeof sr);
+        sr.h = h; sr.base = poff; sr.total = plen; sr.dma = dma; sr.dmacap = FILM_HDR;
         rc = se_jpeg_decode_stream_scaled(hdr + poff, (size_t)got - poff, plen,
                                           soup_stream_read, &sr, FILM_SCALE,
                                           &arena, soup_rows, &L, &ji);
@@ -341,9 +400,10 @@ int soup_develop(const char *src, int is_cr2, const char *tmp,
     if (rc == SE_OK && soup_out_flush(&out) != 0) rc = SE_E_IO;
     if (out.err) rc = SE_E_IO;
     if (rc == SE_OK)
-        soup_log("%s -> %dx%d, %d KB, %s, arena peak %d KB", src, ow, oh,
-                 out.bytes >> 10, stream ? "streamed" : "whole",
-                 (int)(arena.peak >> 10));
+        soup_log("%s -> %dx%d, %d KB, %s, arena peak %d KB; card: read %d ms (%d reads), write %d ms (%d writes)",
+                 src, ow, oh, out.bytes >> 10, stream ? "streamed" : "whole",
+                 (int)(arena.peak >> 10), soup_rd_ms, soup_rd_calls,
+                 soup_wr_ms, soup_wr_calls);
     else
         soup_log("%s: develop failed rc=%d (%s)", src, rc, se_strerror(rc));
 
@@ -466,7 +526,8 @@ int soup_view_flm(const char *path, uint8_t *buf, int pitch, int W, int H,
     se_arena_init(&arena, block, FILM_SCRATCH);
     {
         soup_stream sr;
-        sr.h = h; sr.base = 0; sr.dma = dma; sr.dmacap = FILM_HDR;
+        memset(&sr, 0, sizeof sr);
+        sr.h = h; sr.base = 0; sr.total = fsize; sr.dma = dma; sr.dmacap = FILM_HDR;
         rc = se_jpeg_decode_stream_scaled(hdr, (size_t)got, fsize, soup_stream_read,
                                           &sr, scale, &arena, view_rows, &v, &ji);
     }

@@ -50,12 +50,13 @@ FILM/100CANON/FLM_1234.JPG    the same photo with the look on it
 | | |
 |:--|:--|
 | Module source | adapted from the 60D module, see [What changed from the 60D port](#-what-changed-from-the-60d-port) |
-| Builds against ML `5D2.212` | yes: `soup.mo` 106,500 bytes; all 84 functions it imports are exported by `5D2.212`; relocations only `R_ARM_ABS32` / `R_ARM_CALL` / `R_ARM_JUMP24`; no `%c` in its strings |
+| Builds against ML `5D2.212` | yes: `soup.mo` 107,244 bytes; all 84 functions it imports are exported by `5D2.212`; relocations only `R_ARM_ABS32` / `R_ARM_CALL` / `R_ARM_JUMP24`; no `%c` in its strings |
 | Loads on a 5D Mark II | yes, first try (2026-11-15): reads all 21 stocks, finds the CF card as `A:`. Nothing was developed then: Film was left OFF, and the card's folder was `108_FUJI`, which the module couldn't find (fixed since, see below) |
 | Finds the real DCIM folder | yes: `dcim_test.c` passes 16 checks, and on the camera the module found `A:/DCIM/108_FUJI` where Magic Lantern said `108EOS5D` |
 | Develops on a desktop | yes: the module's own `soup_dev.c` (`host_test.c`) on a synthetic 5616×3744 "Canon EOS 5D Mark II" CR2 gives a 2800×1872 film JPEG with Velvia, Portra, Acros and Soup 800; peak memory about 1.5 MB, nothing leaked |
 | Develops a frame on the camera | yes (2026-11-15): a JPEG L shot (5616×3744, 8.2 MB) became `FILM/108_FUJI/FLM_8661.JPG`, 2800×1872, 701 KB, Classic Chrome, in **68 s**, EXIF model and stock name correct. RAW and RAW+JPEG not tried yet |
-| Faster engine | the 7D port's decoder, encoder and look code (see below): byte-identical output on all 21 stocks, about 40% less CPU on a PC. Time on the camera not measured yet (was 68 s) |
+| Faster engine | the 7D port's decoder, encoder and look code (see below): byte-identical output on all 21 stocks. On the camera: **45–46 s** a JPEG L frame, Classic Chrome (was 68 s) |
+| Card reads | the source is now read 256 KB at a time (34 card reads for a JPEG L, was about 1,000 of 8 KB), same bytes out. `SOUP.LOG` gives the card's share of each develop (`card: read N ms ...`). Not yet timed on the camera |
 | Playback toggle (SET in playback) | **off**: needs the 5D2's playback addresses, see below |
 | Picker on the 4:3 screen | expected to work, about 11% narrower than drawn |
 
@@ -236,6 +237,7 @@ stay where they are. If the camera ever hangs, take the battery out.
 | `src/ml/60d/` → `src/ml/5d2/` | renamed |
 | `src/ml/5d2/soup.c` | playback-photo lookup gated on the 5D Mark II and firmware 2.1.2, with its two addresses left empty (the 60D's are never read); fallback drive `A:` for the CF card; sizes in comments |
 | `src/ml/5d2/soup.c`, `soup_dcim.h`, `dcim_test.c` | finds the DCIM folder really on the card instead of Magic Lantern's guess (number + `EOS5D`), so a folder another camera made, like `108_FUJI`, works; logs any frame it skips. Tested by `dcim_test.c` |
+| `src/ml/5d2/soup_dev.c`, `soup_port.h` | the source JPEG is read through a 256 KB read-ahead instead of a seek and read per 8 KB; each develop logs the time spent reading and writing the card |
 | `src/ml/5d2/soup_ui.c` | the playback log line no longer reads the 60D's addresses; notes on SET (C.Fn IV-3) and the 4:3 screen |
 | `src/ml/5d2/soup_dev.c` | EXIF model fallback is `Canon EOS 5D Mark II` |
 | `src/ml/5d2/ML-PIN.txt`, `Makefile`, `README.rst` | 5D2.212 |
