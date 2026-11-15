@@ -5,7 +5,7 @@ Everything the 5D Mark II needs is in this folder:
 | path | what it is |
 |:--|:--|
 | `ml/5d2/` | the Magic Lantern module: `soup.c` (menu, settings, watching for new frames), `soup_dev.c` (one frame's develop, and the playback viewer), `soup_ui.c` (the picker, the badge, the playback toggle) |
-| `engine/` | this port's copy of the Soup Engine look engine (plain C, integer only) |
+| `engine/` | this port's copy of the Soup Engine look engine (plain C, integer only); `jpeg_dec.c`, `jpeg_enc.c/.h` and `look.c` are the 7D port's faster, byte-identical versions |
 | `stocks/` | the 21 film stocks, with their long names; `INDEX.TXT` sets the order |
 | `recipes/` | the 8 Fuji X Weekly recipes the recipe stocks are made from |
 | `tools/` | `build-5d2.sh`, `recipe2fs.py`, `gen-recipes.sh` |

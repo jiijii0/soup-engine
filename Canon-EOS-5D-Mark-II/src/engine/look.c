@@ -112,7 +112,7 @@ static void tables_init(void)
  * Which hue a pixel is, as 0..1535 -- 256 per sector, R Y G C B M.
  * Returns -1 for a pixel with no colour in it at all.
  */
-static int hue1536(int r, int g, int b, int *chroma)
+static inline int hue1536(int r, int g, int b, int *chroma)
 {
     int mx = r > g ? (r > b ? r : b) : (g > b ? g : b);
     int mn = r < g ? (r < b ? r : b) : (g < b ? g : b);
@@ -159,13 +159,10 @@ static int fit_scale(int num, int den)
  * it to all three. Hue and luminance survive; only the saturation gives,
  * and only by as much as it must.
  */
-static void gamut_fit(int *rr, int *gg, int *bb)
+static __attribute__((noinline)) void gamut_fit_out(int *rr, int *gg, int *bb)
 {
     int r = *rr, g = *gg, b = *bb;
     int y, sc = 256, d;
-
-    if (r >= 0 && r <= 255 && g >= 0 && g <= 255 && b >= 0 && b <= 255)
-        return;                       /* already fits: the common case */
 
     y = (77 * r + 150 * g + 29 * b) >> 8;
     if (y < 0)   y = 0;
@@ -186,6 +183,25 @@ static void gamut_fit(int *rr, int *gg, int *bb)
     *rr = y + (((r - y) * sc) >> 8);
     *gg = y + (((g - y) * sc) >> 8);
     *bb = y + (((b - y) * sc) >> 8);
+}
+
+static inline void gamut_fit(int *rr, int *gg, int *bb)
+{
+    /* already fits: the common case, and no call */
+    if ((unsigned)*rr <= 255 && (unsigned)*gg <= 255 && (unsigned)*bb <= 255)
+        return;
+    gamut_fit_out(rr, gg, bb);
+}
+
+/*
+ * n / d for a d fixed across a row, as one long multiply instead of a
+ * library divide per pixel (no divider on this body). Exact for n < 2^21
+ * and d <= 2048, checked exhaustively; every use here is below 255 * 371.
+ */
+static uint32_t rdiv_m(uint32_t d) { return d < 2 ? 0 : 0xFFFFFFFFu / d + 1; }
+static uint32_t rdiv(uint32_t n, uint32_t m)
+{
+    return m ? (uint32_t)(((uint64_t)n * m) >> 32) : n;
 }
 
 /* ------------------------------------------------- stock -> look ----- */
@@ -276,6 +292,9 @@ void se_look_from_stock(const se_stock *s, int scale, se_look *lk)
 
 /* ------------------------------------------------------- the run ----- */
 
+#define LOOK_MEMO         4096
+#define LOOK_MEMO_HASH(k) (((k) * 2654435761u) >> 20)   /* top 12 bits */
+
 struct se_look_run {
     se_look  lk;
     int      w;
@@ -292,14 +311,47 @@ struct se_look_run {
     uint8_t *scratch;         /* one row of mask, pre-blur               */
 
     uint8_t *flat;            /* !on only: the one row we grade into     */
+
+    /*
+     * Lookup tables, worked out once per develop. They are added AFTER
+     * se_look_fit has chosen the halation radius (see look_core_bytes):
+     * at half size several stocks sit right at the budget, and counting
+     * these against it would quietly shorten their glow.
+     */
+    int      mono;            /* saturation 0, nothing per hue: luma only */
+    uint8_t  mono_px[256 * 3];
+    uint8_t  grain_w[256];    /* grain weight per level, see grain_row    */
+    uint8_t  mask[256];       /* halation mask per luma, see mask_row     */
+    int16_t  glow[256];       /* blurred mask -> glow amount, add_glow    */
+    int16_t  hue_mod[1536][3];/* per-hue sat, lum, rot, interpolated      */
+    /*
+     * Recently graded colours, keyed by the source pixel. The grade is a
+     * pure function of the pixel, so a hit is exactly what grade_px would
+     * produce, for a hash and a compare instead of ~230 instructions.
+     * 4096 entries hit 65-70% of the pixels of real 7D frames (similar
+     * colours recur: sky, skin, shadow). Colour stocks only; mono has its
+     * own table.
+     */
+    struct { uint32_t key; uint8_t px[4]; } memo[LOOK_MEMO];
 };
 
-size_t se_look_bytes(const se_look *lk, int width)
+static inline __attribute__((always_inline))
+void grade_px(const se_look *lk, const int16_t (*hue_mod)[3],
+              int rr, int gg, int bb, uint8_t *out);
+static void grade_row(se_look_run *r, const uint8_t *src, uint8_t *dst,
+                      int w);
+
+/* The run as sized before the lookup tables existed: the radius is chosen
+ * on this, so adding a table can never change a glow. */
+#define LOOK_RUN_CORE   offsetof(struct se_look_run, mono)
+#define LOOK_RUN_TABLES (sizeof(struct se_look_run) - LOOK_RUN_CORE)
+
+static size_t look_core_bytes(const se_look *lk, int width)
 {
     size_t n;
     if (lk->hal_amount <= 0)
-        return sizeof(struct se_look_run) + (size_t)width * 3 + 32;
-    n  = sizeof(struct se_look_run) + 16;
+        return LOOK_RUN_CORE + (size_t)width * 3 + 32;
+    n  = LOOK_RUN_CORE + 16;
     n += (size_t)(2 * lk->hal_radius + 1) * (size_t)width;          /* ring   */
     n += (size_t)(lk->hal_radius + 1) * (size_t)width * 3;          /* delay  */
     n += (size_t)width * sizeof(int);                               /* colsum */
@@ -307,22 +359,26 @@ size_t se_look_bytes(const se_look *lk, int width)
     return n + 64;
 }
 
+size_t se_look_bytes(const se_look *lk, int width)
+{
+    return look_core_bytes(lk, width) + LOOK_RUN_TABLES;
+}
+
 size_t se_look_fit(se_look *lk, int width, size_t budget)
 {
-    size_t n = se_look_bytes(lk, width);
+    size_t n = look_core_bytes(lk, width);
 
     while (lk->hal_amount > 0 && lk->hal_radius > 1 && n > budget) {
         lk->hal_radius--;
-        n = se_look_bytes(lk, width);
+        n = look_core_bytes(lk, width);
     }
     if (n > budget && lk->hal_amount > 0) {
         /* A radius of 1 is not a glow anyway, and with amount 0 the run
          * allocates no delay line at all -- so this always terminates at
          * something that fits. */
         lk->hal_amount = 0;
-        n = se_look_bytes(lk, width);
     }
-    return n;
+    return se_look_bytes(lk, width);
 }
 
 se_err se_look_begin(se_look_run **out, const se_look *lk,
@@ -349,6 +405,62 @@ se_err se_look_begin(se_look_run **out, const se_look *lk,
     memset(r, 0, sizeof *r);
     r->lk = *lk;
     r->w  = width;
+
+    /* Halation: the mask for each luma (how far above the threshold,
+     * scaled so 255 is 255), and the glow for each blurred mask value. */
+    {
+        int v, span = 255 - lk->hal_thresh;
+        uint32_t mspan;
+        if (span < 1) span = 1;
+        mspan = rdiv_m((uint32_t)span);
+        for (v = 0; v < 256; v++) {
+            int d = v - lk->hal_thresh;
+            r->mask[v] = (uint8_t)(d <= 0 ? 0 : rdiv((uint32_t)(d * 255), mspan));
+            r->glow[v] = (int16_t)((v * lk->hal_amount) / 100);
+        }
+    }
+    /* 4v(1-v), in eighths, so grain fades out at both ends: 0..254 */
+    {
+        int v;
+        for (v = 0; v < 256; v++) r->grain_w[v] = (uint8_t)((v * (255 - v)) >> 6);
+    }
+    /* The per-sector settings, interpolated between neighbours, for every
+     * hue a pixel can have: the same sums grade_px did per pixel. */
+    {
+        int h;
+        for (h = 0; h < 1536; h++) {
+            int sec = h >> 8, f = h & 255, nx = (sec == 5 ? 0 : sec + 1);
+            r->hue_mod[h][0] = (int16_t)(lk->hue_sat[sec]
+                + (((lk->hue_sat[nx] - lk->hue_sat[sec]) * f) >> 8));
+            r->hue_mod[h][1] = (int16_t)(lk->hue_lum[sec]
+                + (((lk->hue_lum[nx] - lk->hue_lum[sec]) * f) >> 8));
+            r->hue_mod[h][2] = (int16_t)(lk->hue_rot[sec]
+                + (((lk->hue_rot[nx] - lk->hue_rot[sec]) * f) >> 8));
+        }
+    }
+    /* With saturation 0 the saturation stage leaves (y, y, y), y the luma
+     * of the curve output, and luma8(y, y, y) == y, so the rest of the
+     * chain run on (y, y, y) is exactly what every pixel of luma y gets. */
+    if (!lk->hue_any && lk->sat == 0) {
+        /* through grade_row itself, with the curves set to identity, so
+         * the chain is compiled once (resident size) */
+        uint8_t map[3][256];
+        int y;
+        memcpy(map, r->lk.map, sizeof map);
+        for (y = 0; y < 256; y++) {
+            r->lk.map[0][y] = r->lk.map[1][y] = r->lk.map[2][y] = (uint8_t)y;
+            r->mono_px[3 * y] = r->mono_px[3 * y + 1] = r->mono_px[3 * y + 2] = (uint8_t)y;
+        }
+        grade_row(r, r->mono_px, r->mono_px, 256);
+        memcpy(r->lk.map, map, sizeof map);
+        r->mono = 1;
+    }
+    /* empty the memo (after the mono table, which grades with identity
+     * curves): no pixel has bits above 23, so this key never matches */
+    {
+        int i;
+        for (i = 0; i < LOOK_MEMO; i++) r->memo[i].key = 0xFFFFFFFFu;
+    }
 
     if (lk->hal_amount > 0) {
         r->r      = lk->hal_radius;
@@ -380,114 +492,150 @@ se_err se_look_begin(se_look_run **out, const se_look *lk,
     return SE_OK;
 }
 
-/* Curves, saturation and split tone: everything that needs only the pixel
- * itself. Writes in place. */
-static void grade_row(const se_look *lk, uint8_t *row, int w)
+/* Everything after the curves for one pixel: the per-hue stage, saturation,
+ * split tone, chroma rolloff and the gamut fit. rr, gg, bb are curve output. */
+static inline __attribute__((always_inline))
+void grade_px(const se_look *lk, const int16_t (*hue_mod)[3],
+              int rr, int gg, int bb, uint8_t *out)
+{
+    /*
+     * The per-hue stage, on the colour the curves produced.
+     *
+     * Saturation, rotation and luminance all act on the same two
+     * numbers, so this works in luma + chroma rather than in RGB:
+     * u and v ARE the colour, rotating them IS a hue shift, scaling
+     * them IS saturation, and y on its own IS how bright that hue
+     * renders. Doing it in RGB would need three separate passes and
+     * could not express a rotation at all.
+     *
+     * Everything is derived from luma8's own weights, so the inverse
+     * below is exact up to luma8's truncation -- which is why the
+     * whole block is skipped when a stock asks for nothing per-hue,
+     * rather than relying on it round-tripping to the same bytes.
+     */
+    if (lk->hue_any) {
+        int chroma;
+        int h = hue1536(rr, gg, bb, &chroma);
+        if (h >= 0) {
+            /* the per-sector settings at this hue, from se_look_begin */
+            int msat = hue_mod[h][0], mlum = hue_mod[h][1], mrot = hue_mod[h][2];
+            int y = luma8(rr, gg, bb);
+            int u = bb - y, v = rr - y;
+
+            /*
+             * Fade the whole stage out as the pixel approaches
+             * neutral. See SE_HUE_FULL: the hue of a near-grey pixel
+             * is meaningless, and acting on it tears flat areas into
+             * blotches.
+             */
+            if (chroma < SE_HUE_FULL) {
+                int wt = (chroma * 256) / SE_HUE_FULL;
+                msat = 256 + (((msat - 256) * wt) >> 8);
+                mlum = 256 + (((mlum - 256) * wt) >> 8);
+                mrot = (mrot * wt) >> 8;
+            }
+
+            if (mrot) {
+                /* mrot is within +-512 (hue_rot is clamped there and only
+                 * interpolated and faded after), so one wrap each is the
+                 * same index SE_SIN's double modulo gives */
+                int ia = mrot < 0 ? mrot + 1536 : mrot;
+                int ic = mrot + 384 < 0 ? mrot + 384 + 1536 : mrot + 384;
+                int cs = s_sin[ic], sn = s_sin[ia];
+                int u2 = (u * cs - v * sn) >> 8;
+                int v2 = (u * sn + v * cs) >> 8;
+                u = u2; v = v2;
+            }
+            if (msat != 256) {
+                u = (u * msat) >> 8;
+                v = (v * msat) >> 8;
+            }
+            if (mlum != 256) y = (y * mlum) >> 8;
+
+            rr = y + v;
+            bb = y + u;
+            gg = y - ((77 * v + 29 * u) / 150);
+        }
+    }
+
+    if (lk->sat != 256) {
+        int y = luma8(clamp8(rr), clamp8(gg), clamp8(bb));
+        rr = y + (((rr - y) * lk->sat) >> 8);
+        gg = y + (((gg - y) * lk->sat) >> 8);
+        bb = y + (((bb - y) * lk->sat) >> 8);
+    }
+
+    if (lk->sh[0] | lk->sh[1] | lk->sh[2] |
+        lk->hi[0] | lk->hi[1] | lk->hi[2]) {
+        int y  = luma8(clamp8(rr), clamp8(gg), clamp8(bb));
+        int wl = 255 - y;                  /* shadow weight    */
+        rr += (lk->sh[0] * wl + lk->hi[0] * y) >> 8;
+        gg += (lk->sh[1] * wl + lk->hi[1] * y) >> 8;
+        bb += (lk->sh[2] * wl + lk->hi[2] * y) >> 8;
+    }
+
+    /*
+     * Film's own chroma rolloff, applied once to the finished
+     * colour -- see s_chroma. Before the gamut fit, because it
+     * removes most of what would otherwise need fitting.
+     */
+    {
+        int y = (77 * rr + 150 * gg + 29 * bb) >> 8;
+        int w;
+        if (y < 0)   y = 0;
+        if (y > 255) y = 255;
+        w = s_chroma[y];
+        if (w != 256) {
+            rr = y + (((rr - y) * w) >> 8);
+            gg = y + (((gg - y) * w) >> 8);
+            bb = y + (((bb - y) * w) >> 8);
+        }
+    }
+
+    gamut_fit(&rr, &gg, &bb);
+    out[0] = (uint8_t)clamp8(rr);
+    out[1] = (uint8_t)clamp8(gg);
+    out[2] = (uint8_t)clamp8(bb);
+}
+
+/*
+ * Curves, saturation and split tone: everything that needs only the pixel
+ * itself. src may be dst.
+ *
+ * The look is copied to a local first. The row is bytes, and a byte store
+ * may alias anything, so through the pointer every field of the look was
+ * loaded again for every pixel; a local whose address never escapes cannot
+ * be aliased. Same arithmetic, same bytes.
+ */
+static void grade_row(se_look_run *r, const uint8_t *src, uint8_t *dst,
+                      int w)
 {
     int x;
-    for (x = 0; x < w; x++) {
-        int rr = lk->map[0][row[x * 3 + 0]];
-        int gg = lk->map[1][row[x * 3 + 1]];
-        int bb = lk->map[2][row[x * 3 + 2]];
-
-        /*
-         * The per-hue stage, on the colour the curves produced.
-         *
-         * Saturation, rotation and luminance all act on the same two
-         * numbers, so this works in luma + chroma rather than in RGB:
-         * u and v ARE the colour, rotating them IS a hue shift, scaling
-         * them IS saturation, and y on its own IS how bright that hue
-         * renders. Doing it in RGB would need three separate passes and
-         * could not express a rotation at all.
-         *
-         * Everything is derived from luma8's own weights, so the inverse
-         * below is exact up to luma8's truncation -- which is why the
-         * whole block is skipped when a stock asks for nothing per-hue,
-         * rather than relying on it round-tripping to the same bytes.
-         */
-        if (lk->hue_any) {
-            int chroma;
-            int h = hue1536(rr, gg, bb, &chroma);
-            if (h >= 0) {
-                int sec = h >> 8, f = h & 255, nx = (sec == 5 ? 0 : sec + 1);
-                int msat = lk->hue_sat[sec]
-                         + (((lk->hue_sat[nx] - lk->hue_sat[sec]) * f) >> 8);
-                int mlum = lk->hue_lum[sec]
-                         + (((lk->hue_lum[nx] - lk->hue_lum[sec]) * f) >> 8);
-                int mrot = lk->hue_rot[sec]
-                         + (((lk->hue_rot[nx] - lk->hue_rot[sec]) * f) >> 8);
-                int y = luma8(rr, gg, bb);
-                int u = bb - y, v = rr - y;
-
-                /*
-                 * Fade the whole stage out as the pixel approaches
-                 * neutral. See SE_HUE_FULL: the hue of a near-grey pixel
-                 * is meaningless, and acting on it tears flat areas into
-                 * blotches.
-                 */
-                if (chroma < SE_HUE_FULL) {
-                    int wt = (chroma * 256) / SE_HUE_FULL;
-                    msat = 256 + (((msat - 256) * wt) >> 8);
-                    mlum = 256 + (((mlum - 256) * wt) >> 8);
-                    mrot = (mrot * wt) >> 8;
-                }
-
-                if (mrot) {
-                    int cs = SE_COS(mrot), sn = SE_SIN(mrot);
-                    int u2 = (u * cs - v * sn) >> 8;
-                    int v2 = (u * sn + v * cs) >> 8;
-                    u = u2; v = v2;
-                }
-                if (msat != 256) {
-                    u = (u * msat) >> 8;
-                    v = (v * msat) >> 8;
-                }
-                if (mlum != 256) y = (y * mlum) >> 8;
-
-                rr = y + v;
-                bb = y + u;
-                gg = y - ((77 * v + 29 * u) / 150);
+    if (r->mono) {
+        const uint8_t *m0 = r->lk.map[0], *m1 = r->lk.map[1], *m2 = r->lk.map[2];
+        const uint8_t *t = r->mono_px;
+        for (x = 0; x < w; x++, src += 3, dst += 3) {
+            const uint8_t *p = t + 3 * luma8(m0[src[0]], m1[src[1]], m2[src[2]]);
+            dst[0] = p[0]; dst[1] = p[1]; dst[2] = p[2];
+        }
+        return;
+    }
+    {
+        const se_look lk = r->lk;
+        const int16_t (*hue_mod)[3] = r->hue_mod;
+        for (x = 0; x < w; x++, src += 3, dst += 3) {
+            /* read the whole key first: src may be dst */
+            uint32_t k = (uint32_t)src[0] | (uint32_t)src[1] << 8 | (uint32_t)src[2] << 16;
+            uint8_t *m = r->memo[LOOK_MEMO_HASH(k)].px;
+            if (r->memo[LOOK_MEMO_HASH(k)].key == k) {
+                dst[0] = m[0]; dst[1] = m[1]; dst[2] = m[2];
+                continue;
             }
+            grade_px(&lk, hue_mod, lk.map[0][src[0]], lk.map[1][src[1]],
+                     lk.map[2][src[2]], dst);
+            r->memo[LOOK_MEMO_HASH(k)].key = k;
+            m[0] = dst[0]; m[1] = dst[1]; m[2] = dst[2];
         }
-
-        if (lk->sat != 256) {
-            int y = luma8(clamp8(rr), clamp8(gg), clamp8(bb));
-            rr = y + (((rr - y) * lk->sat) >> 8);
-            gg = y + (((gg - y) * lk->sat) >> 8);
-            bb = y + (((bb - y) * lk->sat) >> 8);
-        }
-
-        if (lk->sh[0] | lk->sh[1] | lk->sh[2] |
-            lk->hi[0] | lk->hi[1] | lk->hi[2]) {
-            int y  = luma8(clamp8(rr), clamp8(gg), clamp8(bb));
-            int wl = 255 - y;                  /* shadow weight    */
-            rr += (lk->sh[0] * wl + lk->hi[0] * y) >> 8;
-            gg += (lk->sh[1] * wl + lk->hi[1] * y) >> 8;
-            bb += (lk->sh[2] * wl + lk->hi[2] * y) >> 8;
-        }
-
-        /*
-         * Film's own chroma rolloff, applied once to the finished
-         * colour -- see s_chroma. Before the gamut fit, because it
-         * removes most of what would otherwise need fitting.
-         */
-        {
-            int y = (77 * rr + 150 * gg + 29 * bb) >> 8;
-            int w;
-            if (y < 0)   y = 0;
-            if (y > 255) y = 255;
-            w = s_chroma[y];
-            if (w != 256) {
-                rr = y + (((rr - y) * w) >> 8);
-                gg = y + (((gg - y) * w) >> 8);
-                bb = y + (((bb - y) * w) >> 8);
-            }
-        }
-
-        gamut_fit(&rr, &gg, &bb);
-        row[x * 3 + 0] = (uint8_t)clamp8(rr);
-        row[x * 3 + 1] = (uint8_t)clamp8(gg);
-        row[x * 3 + 2] = (uint8_t)clamp8(bb);
     }
 }
 
@@ -500,42 +648,42 @@ static void grade_row(const se_look *lk, uint8_t *row, int w)
  * a soft knee would be prettier, but this is what a threshold means and it
  * is one comparison.
  */
-static void mask_row(const se_look *lk, const uint8_t *row, int w,
+static void mask_row(const se_look_run *r, const uint8_t *row, int w,
                      uint8_t *scratch, uint8_t *dst)
 {
-    int x, rad = lk->hal_radius, win = 2 * rad + 1;
+    int x, rad = r->lk.hal_radius, win = 2 * rad + 1;
     long sum = 0;
-    int  span = 255 - lk->hal_thresh;
-    if (span < 1) span = 1;
+    uint32_t mwin = rdiv_m((uint32_t)win);
+    const uint8_t *mask = r->mask;     /* per luma, from se_look_begin */
 
-    for (x = 0; x < w; x++) {
-        int y = luma8(row[x * 3], row[x * 3 + 1], row[x * 3 + 2]);
-        int v = y - lk->hal_thresh;
-        scratch[x] = (uint8_t)(v <= 0 ? 0 : (v * 255) / span);
-    }
+    for (x = 0; x < w; x++, row += 3)
+        scratch[x] = mask[luma8(row[0], row[1], row[2])];
 
     /* prime the window with the left edge clamped */
     for (x = -rad; x <= rad; x++)
         sum += scratch[x < 0 ? 0 : (x >= w ? w - 1 : x)];
     for (x = 0; x < w; x++) {
         int add = x + rad + 1, sub = x - rad;
-        dst[x] = (uint8_t)(sum / win);
+        dst[x] = (uint8_t)rdiv((uint32_t)sum, mwin);
         sum += scratch[add >= w ? w - 1 : add];
         sum -= scratch[sub < 0 ? 0 : sub];
     }
 }
 
 /* Add the glow to one row, given its vertical column sums. */
-static void add_glow(const se_look *lk, uint8_t *row, int w,
+static void add_glow(const se_look_run *r, uint8_t *row, int w,
                      const int *colsum, int nrows)
 {
-    int x;
+    int x, t0 = r->lk.hal_tint[0], t1 = r->lk.hal_tint[1], t2 = r->lk.hal_tint[2];
+    const int16_t *glow = r->glow;     /* (g * hal_amount) / 100 */
+    uint32_t mrows;
     if (nrows < 1) nrows = 1;
+    mrows = rdiv_m((uint32_t)nrows);
     for (x = 0; x < w; x++) {
-        int g = colsum[x] / nrows;              /* 0..255 */
+        int g = colsum[x] > 0 ? (int)rdiv((uint32_t)colsum[x], mrows) : 0;  /* 0..255 */
         int a, room;
         if (g <= 0) continue;
-        a = (g * lk->hal_amount) / 100;
+        a = glow[g];
 
         /*
          * Fade the glow out where the frame is already bright.
@@ -557,40 +705,57 @@ static void add_glow(const se_look *lk, uint8_t *row, int w,
         a = (a * room) / 255;
         if (a <= 0) continue;
 
-        row[x * 3 + 0] = (uint8_t)clamp8(row[x * 3 + 0] + ((a * lk->hal_tint[0]) >> 8));
-        row[x * 3 + 1] = (uint8_t)clamp8(row[x * 3 + 1] + ((a * lk->hal_tint[1]) >> 8));
-        row[x * 3 + 2] = (uint8_t)clamp8(row[x * 3 + 2] + ((a * lk->hal_tint[2]) >> 8));
+        row[x * 3 + 0] = (uint8_t)clamp8(row[x * 3 + 0] + ((a * t0) >> 8));
+        row[x * 3 + 1] = (uint8_t)clamp8(row[x * 3 + 1] + ((a * t1) >> 8));
+        row[x * 3 + 2] = (uint8_t)clamp8(row[x * 3 + 2] + ((a * t2) >> 8));
     }
 }
 
-static void grain_row(const se_look *lk, uint8_t *row, int w, int y)
+static void grain_row(const se_look_run *r, uint8_t *row, int w, int y)
 {
-    int x, cell = lk->grain_cell;
+    int x, cell = r->lk.grain_cell, cx = 0, k = 0, d = 0;
+    unsigned cy = (unsigned)(y / cell);
+    const uint8_t *gw = r->grain_w;
     /* 0..100 -> about +-15 at full strength. This was 72/100, which put
      * +-28 on a midtone: at that amplitude a coarse stock stopped reading
      * as emulsion and started reading as sensor noise, which is the one
      * thing grain must not look like. */
-    int amp = (lk->grain * SE_GRAIN_AMP) / 100;
+    int amp = (r->lk.grain * SE_GRAIN_AMP) / 100;
     if (amp <= 0) return;
-    for (x = 0; x < w; x++) {
-        int n = (int)(grain_hash((unsigned)(x / cell), (unsigned)(y / cell),
-                                 0x5EEDu) & 0xFFFF);
-        int d = ((n - 32768) * amp) >> 15;
-        int c;
-        for (c = 0; c < 3; c++) {
-            int v = row[x * 3 + c];
-            /* 4v(1-v), in eighths, so grain fades out at both ends */
-            int wgt = (v * (255 - v)) >> 6;     /* 0..254 */
-            row[x * 3 + c] = (uint8_t)clamp8(v + ((d * wgt) >> 8));
+    /* cx is x / cell, kept as a counter: a divide per pixel otherwise.
+     * The hash is per cell, so it is only worked out when cx moves. */
+#define GRAIN_CELL()                                                      \
+        if (k == 0) {                                                     \
+            int n = (int)(grain_hash((unsigned)cx, cy, 0x5EEDu) & 0xFFFF); \
+            d = ((n - 32768) * amp) >> 15;                                \
+        }
+    if (amp <= SE_GRAIN_AMP) {
+        /* up to full strength the weight keeps every result inside 0..255
+         * (checked for every level, amplitude and hash): no clamp */
+        for (x = 0; x < w; x++, row += 3) {
+            GRAIN_CELL()
+            row[0] = (uint8_t)(row[0] + ((d * gw[row[0]]) >> 8));
+            row[1] = (uint8_t)(row[1] + ((d * gw[row[1]]) >> 8));
+            row[2] = (uint8_t)(row[2] + ((d * gw[row[2]]) >> 8));
+            if (++k == cell) { k = 0; cx++; }
+        }
+    } else {
+        for (x = 0; x < w; x++, row += 3) {
+            GRAIN_CELL()
+            row[0] = (uint8_t)clamp8(row[0] + ((d * gw[row[0]]) >> 8));
+            row[1] = (uint8_t)clamp8(row[1] + ((d * gw[row[1]]) >> 8));
+            row[2] = (uint8_t)clamp8(row[2] + ((d * gw[row[2]]) >> 8));
+            if (++k == cell) { k = 0; cx++; }
         }
     }
+#undef GRAIN_CELL
 }
 
 /* One row, fully graded and already in `dst`, ready to go out. */
 static se_err emit_one(se_look_run *r, uint8_t *dst,
                        se_look_emit emit, void *ctx)
 {
-    if (r->lk.grain > 0) grain_row(&r->lk, dst, r->w, r->y_out);
+    if (r->lk.grain > 0) grain_row(r, dst, r->w, r->y_out);
     r->y_out++;
     return emit(ctx, dst, r->w) == 0 ? SE_OK : SE_E_IO;
 }
@@ -636,9 +801,8 @@ static se_err push_row(se_look_run *r, const uint8_t *src,
     if (r->pushed >= r->nring)
         for (x = 0; x < w; x++) r->colsum[x] -= msk[x];
 
-    memcpy(dly, src, (size_t)w * 3);
-    grade_row(&r->lk, dly, w);
-    mask_row(&r->lk, dly, w, r->scratch, msk);
+    grade_row(r, src, dly, w);
+    mask_row(r, dly, w, r->scratch, msk);
 
     for (x = 0; x < w; x++) r->colsum[x] += msk[x];
 
@@ -654,7 +818,7 @@ static se_err emit_delayed(se_look_run *r, int p,
     int      slot = (p - r->r) % r->ndelay;
     uint8_t *dly  = r->delay + (size_t)slot * r->w * 3;
 
-    add_glow(&r->lk, dly, r->w, r->colsum, r->nring);
+    add_glow(r, dly, r->w, r->colsum, r->nring);
     return emit_one(r, dly, emit, ctx);
 }
 
@@ -673,8 +837,7 @@ se_err se_look_rows(se_look_run *r, const uint8_t *rgb, int nrows,
             /* No halation, so no neighbourhood and no delay: grade and go.
              * The caller's rows are const and may be the decoder's own
              * scratch, so the grade lands in our row, never in theirs. */
-            memcpy(r->flat, src, (size_t)r->w * 3);
-            grade_row(&r->lk, r->flat, r->w);
+            grade_row(r, src, r->flat, r->w);
             e = emit_one(r, r->flat, emit, ctx);
             if (e != SE_OK) return e;
             continue;

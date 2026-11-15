@@ -36,6 +36,8 @@ typedef struct {
     int   iso;               /* 0 to omit */
     const uint8_t *thumb;    /* JPEG thumbnail, or NULL */
     int   thumb_len;
+    int   orientation;       /* EXIF 1..8; 0 = 1 (normal). A port grading a
+                              * camera JPG keeps its orientation this way. */
 } se_jpeg_exif;
 
 typedef struct {
@@ -50,6 +52,7 @@ typedef struct {
     uint32_t qrecip[2][64];    /* Q16 reciprocals  */
 
     /* bit assembly */
+    uint32_t qzero[2][64];   /* |v| <= this quantises to 0, see encode_block */
     uint32_t bitbuf;
     int      bitcnt;
 

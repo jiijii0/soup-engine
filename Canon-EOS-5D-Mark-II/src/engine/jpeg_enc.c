@@ -232,7 +232,8 @@ static int build_exif(uint8_t *out, int cap, const se_jpeg_exif *x,
 
     ew_ascii(&w, 0, 0x010f, x->make);
     ew_ascii(&w, 0, 0x0110, x->model);
-    ew_short(&w, 0, 0x0112, 1);                 /* Orientation: normal */
+    ew_short(&w, 0, 0x0112,                     /* Orientation       */
+             (x->orientation >= 1 && x->orientation <= 8) ? (unsigned)x->orientation : 1u);
     ew_ascii(&w, 0, 0x0131, x->software);
     ew_ascii(&w, 0, 0x0132, x->datetime);
     ew_long (&w, 0, 0x8769, (uint32_t)w.ifd1);  /* -> Exif IFD */
@@ -293,7 +294,7 @@ static void jo_flush(se_jpeg *j)
     j->outpos = 0;
 }
 
-static void jo_byte(se_jpeg *j, uint8_t b)
+static __attribute__((noinline)) void jo_byte(se_jpeg *j, uint8_t b)
 {
     if (j->outpos >= (int)sizeof j->out) jo_flush(j);
     j->out[j->outpos++] = b;
@@ -311,7 +312,8 @@ static void jo_u16(se_jpeg *j, unsigned v)
     jo_byte(j, (uint8_t)(v & 0xff));
 }
 
-static void jo_bits(se_jpeg *j, uint32_t code, int len)
+/* headers and the final flush only: not worth inlining (resident size) */
+static __attribute__((noinline)) void jo_bits(se_jpeg *j, uint32_t code, int len)
 {
     j->bitcnt += len;
     j->bitbuf |= (uint32_t)code << (24 - j->bitcnt);
@@ -369,8 +371,8 @@ static void fdct(int32_t *d)
         tmp10 = tmp0 + tmp3; tmp13 = tmp0 - tmp3;
         tmp11 = tmp1 + tmp2; tmp12 = tmp1 - tmp2;
 
-        p[0] = (tmp10 + tmp11) << PASS1_BITS;
-        p[4] = (tmp10 - tmp11) << PASS1_BITS;
+        p[0] = (tmp10 + tmp11) * (1 << PASS1_BITS);
+        p[4] = (tmp10 - tmp11) * (1 << PASS1_BITS);
 
         z1 = (tmp12 + tmp13) * FIX_0_541196100;
         p[2] = DESCALE(z1 + tmp13 * FIX_0_765366865, CONST_BITS - PASS1_BITS);
@@ -442,61 +444,104 @@ static void fdct(int32_t *d)
 
 /* --------------------------------------------------------- encoding --- */
 
+/* Bits needed for |v|: one CLZ instruction (ARMv5TE) instead of a shift
+ * loop per coefficient. */
 static int magnitude(int v)
 {
-    int n = 0;
     if (v < 0) v = -v;
-    while (v) { n++; v >>= 1; }
-    return n;
+    return v ? 32 - __builtin_clz((unsigned)v) : 0;
 }
+
+/*
+ * Quantise: round(v / (8 q)) by reciprocal multiply, no hardware divider
+ * here. 32-bit is enough: |v| < 2^15 out of the islow DCT and r <= 8192,
+ * so |v| * r + 32768 < 2^29. (It was a 64-bit multiply and add.)
+ */
+static inline int32_t quant(int32_t v, uint32_t r)
+{
+    if (v >= 0) return  (int32_t)(((uint32_t) v * r + 32768u) >> 16);
+    else        return -(int32_t)(((uint32_t)-v * r + 32768u) >> 16);
+}
+
+/*
+ * A block's codes are collected as (length << 16 | bits) and written in one
+ * loop at the end, with the bit buffer and output position on locals:
+ * through j every field was loaded and stored again for every code, and a
+ * writer expanded at each of the six places a code is produced made the
+ * module 2.5 KB bigger. Same bits, same byte stuffing, and the output
+ * buffer is flushed at the same points as jo_byte, so the stream is
+ * byte-for-byte what jo_bits wrote.
+ */
+#define QUEUE(code_, len_) (cq[nq++] = ((uint32_t)(len_) << 16) | (uint32_t)(code_))
 
 static void encode_block(se_jpeg *j, int32_t *blk, int qtbl, int comp,
                          const uint32_t *dc, const uint32_t *ac)
 {
-    int32_t  q[64];
-    int      i, k, run, dcdiff, m;
-    uint32_t c;
+    const uint32_t *qr = j->qrecip[qtbl], *qz = j->qzero[qtbl];
+    uint32_t  cq[2 + 3 * 63 + 1], c;     /* DC, then per AC: ZRLs, code, bits */
+    int       nq = 0, i, k, run, dcdiff, m;
+    int32_t   q0;
 
     fdct(blk);
 
-    for (i = 0; i < 64; i++) {
-        int32_t  v = blk[i];
-        uint32_t r = j->qrecip[qtbl][i];
-        /* reciprocal multiply instead of a divide: no hardware divider here */
-        if (v >= 0) q[i] =  (int32_t)(((int64_t) v * r + 32768) >> 16);
-        else        q[i] = -(int32_t)(((int64_t)-v * r + 32768) >> 16);
-    }
-
     /* --- DC: differential against the previous block of this component -- */
-    dcdiff = q[0] - j->dcpred[comp];
-    j->dcpred[comp] = q[0];
+    q0 = quant(blk[0], qr[0]);
+    dcdiff = q0 - j->dcpred[comp];
+    j->dcpred[comp] = q0;
     m = magnitude(dcdiff);
     c = dc[m];
-    jo_bits(j, c & 0xffff, (int)(c >> 16));
+    QUEUE(c & 0xffff, c >> 16);
     if (m)
-        jo_bits(j, (uint32_t)(dcdiff < 0 ? dcdiff - 1 : dcdiff) & ((1u << m) - 1), m);
+        QUEUE((uint32_t)(dcdiff < 0 ? dcdiff - 1 : dcdiff) & ((1u << m) - 1), m);
 
-    /* --- AC, in zig-zag order ------------------------------------------ */
+    /* --- AC, in zig-zag order, quantised as they are reached ----------- */
     run = 0;
     for (k = 1; k < 64; k++) {
-        int32_t v = q[g_zigzag[k]];
-        if (v == 0) { run++; continue; }
+        int     z = g_zigzag[k];
+        int32_t v = blk[z];
+        /* |v| below the threshold quantises to 0: most of the high
+         * frequencies, now one compare instead of a multiply */
+        if ((uint32_t)(v + (int32_t)qz[z]) < 2 * qz[z] + 1) { run++; continue; }
+        v = quant(v, qr[z]);
         while (run > 15) {
             c = ac[0xf0];                       /* ZRL: 16 zeroes */
-            jo_bits(j, c & 0xffff, (int)(c >> 16));
+            QUEUE(c & 0xffff, c >> 16);
             run -= 16;
         }
         m = magnitude(v);
         c = ac[(run << 4) | m];
-        jo_bits(j, c & 0xffff, (int)(c >> 16));
-        jo_bits(j, (uint32_t)(v < 0 ? v - 1 : v) & ((1u << m) - 1), m);
+        QUEUE(c & 0xffff, c >> 16);
+        QUEUE((uint32_t)(v < 0 ? v - 1 : v) & ((1u << m) - 1), m);
         run = 0;
     }
     if (run) {
         c = ac[0x00];                           /* EOB */
-        jo_bits(j, c & 0xffff, (int)(c >> 16));
+        QUEUE(c & 0xffff, c >> 16);
+    }
+
+    {
+        uint8_t  *o  = j->out;
+        int       op = j->outpos, bc = j->bitcnt;
+        uint32_t  bb = j->bitbuf;
+        for (i = 0; i < nq; i++) {
+            bc += (int)(cq[i] >> 16);
+            bb |= (cq[i] & 0xffff) << (24 - bc);
+            while (bc >= 8) {
+                uint8_t b8 = (uint8_t)(bb >> 16);
+                if (op >= (int)sizeof j->out) { j->outpos = op; jo_flush(j); op = 0; }
+                o[op++] = b8;
+                if (b8 == 0xff) {                 /* byte stuffing */
+                    if (op >= (int)sizeof j->out) { j->outpos = op; jo_flush(j); op = 0; }
+                    o[op++] = 0x00;
+                }
+                bb <<= 8;
+                bc  -= 8;
+            }
+        }
+        j->outpos = op; j->bitcnt = bc; j->bitbuf = bb;
     }
 }
+#undef QUEUE
 
 
 /* --------------------------------------------------------- headers ---- */
@@ -571,6 +616,9 @@ se_err se_jpeg_begin(se_jpeg *j, int width, int height, int quality,
          */
         j->qrecip[0][i] = (uint32_t)((65536u + 4u * j->qt[0][i]) / (8u * j->qt[0][i]));
         j->qrecip[1][i] = (uint32_t)((65536u + 4u * j->qt[1][i]) / (8u * j->qt[1][i]));
+        /* the largest |v| that quant() rounds to 0: |v| r + 32768 < 65536 */
+        j->qzero[0][i] = (32767u / j->qrecip[0][i]);
+        j->qzero[1][i] = (32767u / j->qrecip[1][i]);
     }
 
     /* SOI, then EXIF. A 50D file has no JFIF marker in front of it. */
@@ -620,47 +668,47 @@ se_err se_jpeg_begin(se_jpeg *j, int width, int height, int quality,
 }
 
 /* Rec.601, level-shifted by -128. Cb and Cr are already signed. */
-static void yuv_of(const uint8_t *p, int *y, int *cb, int *cr)
+#define Y_OF(r, g, b)  ((( 19595 * (r) + 38470 * (g) +  7471 * (b) + 32768) >> 16) - 128)
+#define CB_OF(r, g, b)  ((-11056 * (r) - 21712 * (g) + 32768 * (b) + 32768) >> 16)
+#define CR_OF(r, g, b)  (( 32768 * (r) - 27440 * (g) -  5328 * (b) + 32768) >> 16)
+
+/*
+ * Two horizontally adjacent pixels: both lumas, and the 4:2:2 chroma as the
+ * mean of the two pixels' own (rounded) chroma.
+ */
+static inline void yuv_pair(const uint8_t *p, const uint8_t *q,
+                            int32_t *y, int32_t *cb, int32_t *cr)
 {
-    int r = p[0], g = p[1], b = p[2];
-    *y  = (( 19595 * r + 38470 * g +  7471 * b + 32768) >> 16) - 128;
-    *cb =  (-11056 * r - 21712 * g + 32768 * b + 32768) >> 16;
-    *cr =  ( 32768 * r - 27440 * g -  5328 * b + 32768) >> 16;
+    int r0 = p[0], g0 = p[1], b0 = p[2], r1 = q[0], g1 = q[1], b1 = q[2];
+    y[0] = Y_OF(r0, g0, b0);
+    y[1] = Y_OF(r1, g1, b1);
+    *cb  = (CB_OF(r0, g0, b0) + CB_OF(r1, g1, b1)) >> 1;
+    *cr  = (CR_OF(r0, g0, b0) + CR_OF(r1, g1, b1)) >> 1;
 }
 
 /* Encode the 8 rows currently held in j->strip as 16x8 MCUs. */
 static void encode_strip(se_jpeg *j)
 {
     int w = j->width;
-    int mcu, by, col;
+    int mcu, by, i;
 
     for (mcu = 0; mcu * 16 < w; mcu++) {
-        int32_t Y0[64], Y1[64], Cb[64], Cr[64];
+        int32_t Y[128], Cb[64], Cr[64];     /* Y: the left block, then the right */
         int x0 = mcu * 16;
-        int cb0 = 0, cr0 = 0;
 
         for (by = 0; by < 8; by++) {
             const uint8_t *src = j->strip + (size_t)by * w * 3;
-            for (col = 0; col < 16; col++) {
-                int x = x0 + col;
-                int y, cb, cr;
-                if (x >= w) x = w - 1;
-                yuv_of(src + x * 3, &y, &cb, &cr);
-                if (col < 8) Y0[by * 8 + col] = y;
-                else         Y1[by * 8 + col - 8] = y;
-                if ((col & 1) == 0) {
-                    cb0 = cb;
-                    cr0 = cr;
-                } else {
-                    int i = col >> 1;
-                    Cb[by * 8 + i] = (cb0 + cb) >> 1;
-                    Cr[by * 8 + i] = (cr0 + cr) >> 1;
-                }
+            for (i = 0; i < 8; i++) {
+                int xa = x0 + 2 * i, xb = xa + 1;
+                int32_t *yo = Y + (i >> 2) * 64 + by * 8 + (i & 3) * 2;
+                /* at the right edge, columns past the width repeat the last */
+                if (xb >= w) { xb = w - 1; if (xa >= w) xa = w - 1; }
+                yuv_pair(src + xa * 3, src + xb * 3, yo, &Cb[by * 8 + i], &Cr[by * 8 + i]);
             }
         }
 
-        encode_block(j, Y0, 0, 0, g_dc_lum, g_ac_lum);
-        encode_block(j, Y1, 0, 0, g_dc_lum, g_ac_lum);
+        encode_block(j, Y,      0, 0, g_dc_lum, g_ac_lum);
+        encode_block(j, Y + 64, 0, 0, g_dc_lum, g_ac_lum);
         encode_block(j, Cb, 1, 1, g_dc_chr, g_ac_chr);
         encode_block(j, Cr, 1, 2, g_dc_chr, g_ac_chr);
     }

@@ -236,9 +236,14 @@ static int jd_decode(jd_bits *b, const jd_huff *h)
  * million blocks for a 4 MP frame it costs a second or two on this body,
  * and correctness was the scarcer commodity here.
  *
+ * On the 7D it was six seconds of a half-size develop, so the transforms
+ * below now group these same sums by symmetry (bit-identical, checked on
+ * 20 million random blocks against this table). The table stays as the
+ * definition the constants come from.
+ *
  *   jd_ct[u][x] = 1/2 * C(u) * cos((2x+1) u pi / 16),  C(0) = 1/sqrt(2)
  */
-static const int16_t jd_ct[8][8] = {
+static const int16_t jd_ct[8][8] __attribute__((unused)) = {
     {   5793,   5793,   5793,   5793,   5793,   5793,   5793,   5793 },
     {   8035,   6811,   4551,   1598,  -1598,  -4551,  -6811,  -8035 },
     {   7568,   3135,  -3135,  -7568,  -7568,  -3135,   3135,   7568 },
@@ -276,28 +281,83 @@ static void jd_fill_block(uint8_t *out, int stride, int n, int dc)
         for (x = 0; x < n; x++) out[y * stride + x] = c;
 }
 
+/*
+ * The same sums as the matrix definition, grouped by the basis's symmetry:
+ * jd_ct[u][7-y] = (-1)^u jd_ct[u][y], so the even coefficients give one
+ * term E and the odd ones another O, and out[y] = E + O, out[7-y] = E - O.
+ * The even half repeats the pattern again (jd_ct[0] and jd_ct[4] are
+ * both +-5793). A column whose AC terms are all zero (most of them) is one
+ * multiply.
+ *
+ * The products are then shared the way the Loeffler-Ligtenberg-Moschytz
+ * IDCT shares them, but with every derived constant an exact integer sum
+ * of the four basis values (c1 8035, c3 6811, c5 4551, c7 1598), e.g.
+ * 1729 = -c1 + c3 + c5 - c7, and 3135 (a2 + a6) + 4433 a2 = 7568 a2 +
+ * 3135 a6. Only integer distributivity: the sums are the same integers,
+ * bit for bit (checked on 20 million random blocks against the plain
+ * form), at 14 multiplies per 8 points instead of 22.
+ */
+/*
+ * Eight points in at stride `st`, eight out. One shared copy (resident
+ * size); it takes a pointer rather than the eight values, which as nine
+ * arguments went half on the stack for each of its 16 calls a block.
+ */
+static void jd_idct8_1d(const int *in, int st, int *o)
+{
+    int a0 = in[0],      a1 = in[st],     a2 = in[2 * st], a3 = in[3 * st];
+    int a4 = in[4 * st], a5 = in[5 * st], a6 = in[6 * st], a7 = in[7 * st];
+    int p  = 5793 * (a0 + a4), q  = 5793 * (a0 - a4);
+    int z  = 3135 * (a2 + a6);
+    int r0 = z + 4433 * a2;                 /* 7568 a2 + 3135 a6 */
+    int r1 = z - 10703 * a6;                /* 3135 a2 - 7568 a6 */
+    int e0 = p + r0, e1 = q + r1, e2 = q - r1, e3 = p - r0;
+    int z5 = 6811 * (a1 + a3 + a5 + a7);
+    int z1 = -5213 * (a7 + a1);
+    int z2 = -14846 * (a5 + a3);
+    int z3 = -11362 * (a7 + a3) + z5;
+    int z4 = -2260 * (a5 + a1) + z5;
+    int o0 = 8697 * a1 + z1 + z4;           /* 8035 a1 + 6811 a3 + 4551 a5 + 1598 a7 */
+    int o1 = 17799 * a3 + z2 + z3;          /* 6811 a1 - 1598 a3 - 8035 a5 - 4551 a7 */
+    int o2 = 11893 * a5 + z2 + z4;          /* 4551 a1 - 8035 a3 + 1598 a5 + 6811 a7 */
+    int o3 = 1729 * a7 + z1 + z3;           /* 1598 a1 - 4551 a3 + 6811 a5 - 8035 a7 */
+    o[0] = e0 + o0; o[7] = e0 - o0;
+    o[1] = e1 + o1; o[6] = e1 - o1;
+    o[2] = e2 + o2; o[5] = e2 - o2;
+    o[3] = e3 + o3; o[4] = e3 - o3;
+}
+
 static void jd_idct(const int *in, uint8_t *out, int stride)
 {
-    int tmp[64];
-    int u, x, y;
+    int tmp[64], v[8];
+    int x, y;
 
     if (jd_flat(in, 8)) { jd_fill_block(out, stride, 8, in[0]); return; }
 
-    /* columns: for each column x, transform the 8 vertical coefficients */
+    /* columns */
     for (x = 0; x < 8; x++) {
-        for (y = 0; y < 8; y++) {
-            int acc = 0;
-            for (u = 0; u < 8; u++) acc += jd_ct[u][y] * in[u * 8 + x];
-            tmp[y * 8 + x] = JD_DESCALE(acc, 11);
+        const int *c = in + x;
+        if (!(c[8] | c[16] | c[24] | c[32] | c[40] | c[48] | c[56])) {
+            int t = JD_DESCALE(5793 * c[0], 11);
+            for (y = 0; y < 8; y++) tmp[y * 8 + x] = t;
+            continue;
         }
+        jd_idct8_1d(c, 8, v);
+        for (y = 0; y < 8; y++) tmp[y * 8 + x] = JD_DESCALE(v[y], 11);
     }
     /* rows */
     for (y = 0; y < 8; y++) {
+        const int *t = tmp + y * 8;
         uint8_t *o = out + y * stride;
+        if (!(t[1] | t[2] | t[3] | t[4] | t[5] | t[6] | t[7])) {
+            /* no AC in this row: every output is 5793 t[0], as above */
+            int acc = JD_DESCALE(5793 * t[0], 17) + 128;
+            uint8_t c = (uint8_t)(acc < 0 ? 0 : acc > 255 ? 255 : acc);
+            for (x = 0; x < 8; x++) o[x] = c;
+            continue;
+        }
+        jd_idct8_1d(t, 1, v);
         for (x = 0; x < 8; x++) {
-            int acc = 0;
-            for (u = 0; u < 8; u++) acc += jd_ct[u][x] * tmp[y * 8 + u];
-            acc = JD_DESCALE(acc, 17) + 128;
+            int acc = JD_DESCALE(v[x], 17) + 128;
             o[x] = (uint8_t)(acc < 0 ? 0 : acc > 255 ? 255 : acc);
         }
     }
@@ -331,25 +391,40 @@ static void jd_idct(const int *in, uint8_t *out, int stride)
  */
 static void jd_idct4(const int *in, uint8_t *out, int stride)
 {
+    /* jd_ct[2u][y] for u, y < 4, grouped as in jd_idct8_1d's even half:
+     * 6 multiplies per 4 points instead of 16, bit-identical. */
     int tmp[16];
-    int u, x, y;
+    int x, y;
 
     if (jd_flat(in, 4)) { jd_fill_block(out, stride, 4, in[0]); return; }
 
     for (x = 0; x < 4; x++) {
-        for (y = 0; y < 4; y++) {
-            int acc = 0;
-            for (u = 0; u < 4; u++) acc += jd_ct[u * 2][y] * in[u * 8 + x];
-            tmp[y * 4 + x] = JD_DESCALE(acc, 11);
+        int a = in[x], b = in[8 + x], c = in[16 + x], d = in[24 + x];
+        int p, q, r0, r1;
+        if (!(b | c | d)) {
+            int t = JD_DESCALE(5793 * a, 11);
+            tmp[x] = tmp[4 + x] = tmp[8 + x] = tmp[12 + x] = t;
+            continue;
         }
+        p  = 5793 * (a + c);        q  = 5793 * (a - c);
+        r0 = 3135 * (b + d);                    /* as in jd_idct8_1d */
+        r1 = r0 - 10703 * d;  r0 += 4433 * b;
+        tmp[x]      = JD_DESCALE(p + r0, 11);
+        tmp[4 + x]  = JD_DESCALE(q + r1, 11);
+        tmp[8 + x]  = JD_DESCALE(q - r1, 11);
+        tmp[12 + x] = JD_DESCALE(p - r0, 11);
     }
     for (y = 0; y < 4; y++) {
+        const int *t = tmp + y * 4;
         uint8_t *o = out + y * stride;
-        for (x = 0; x < 4; x++) {
-            int acc = 0;
-            for (u = 0; u < 4; u++) acc += jd_ct[u * 2][x] * tmp[y * 4 + u];
-            acc = JD_DESCALE(acc, 17) + 128;
-            o[x] = (uint8_t)(acc < 0 ? 0 : acc > 255 ? 255 : acc);
+        int p  = 5793 * (t[0] + t[2]), q  = 5793 * (t[0] - t[2]);
+        int z  = 3135 * (t[1] + t[3]);
+        int r0 = z + 4433 * t[1], r1 = z - 10703 * t[3];
+        int v[4], i;
+        v[0] = p + r0; v[1] = q + r1; v[2] = q - r1; v[3] = p - r0;
+        for (i = 0; i < 4; i++) {
+            int acc = JD_DESCALE(v[i], 17) + 128;
+            o[i] = (uint8_t)(acc < 0 ? 0 : acc > 255 ? 255 : acc);
         }
     }
 }
@@ -373,6 +448,7 @@ typedef struct {
     int      mcux, mcuy, mcuw, mcuh;   /* mcuw/mcuh in delivered samples  */
     int      restart;
     uint16_t qt[4][64];
+    uint8_t *clamp;                /* clamp[384 + v]: v limited to 0..255 */
     jd_huff  hdc[4], hac[4];
     jd_comp  c[JD_MAXCOMP];
 } jd_state;
@@ -545,8 +621,9 @@ static se_err jd_run(const uint8_t *d, size_t len,
     jd_bits   bits;
     size_t    scan = 0;
     se_err    rc;
-    int       i, mx, my, blk[64];
-    uint8_t  *rgb;
+    int       i, mx, my, blk[64], nset, skip;
+    int       ysh[JD_MAXCOMP], xsh[JD_MAXCOMP];
+    uint8_t  *rgb, set[64];
 
     if (scale != 1 && scale != 2) return SE_E_UNSUPPORTED;
 
@@ -580,6 +657,29 @@ static se_err jd_run(const uint8_t *d, size_t len,
     }
     rgb = SE_NEW(a, uint8_t, (size_t)s->mcux * s->mcuw * 3 * s->mcuh);
     if (!rgb) return SE_E_NOMEM;
+    /* YCbCr -> RGB lands in -227..480: a table lookup instead of two
+     * compares per channel */
+    s->clamp = SE_NEW(a, uint8_t, 1024);
+    if (!s->clamp) return SE_E_NOMEM;
+    for (i = 0; i < 1024; i++) {
+        int v = i - 384;
+        s->clamp[i] = (uint8_t)(v < 0 ? 0 : v > 255 ? 255 : v);
+    }
+
+    /*
+     * Chroma sampling factors are 1 or 2 (jd_parse refuses anything else),
+     * so x * hs / hmax is x or x >> 1. As a divide it was two library calls
+     * per output pixel on a body with no divider.
+     */
+    for (i = 0; i < s->ncomp; i++) {
+        xsh[i] = s->c[i].hs < s->hmax;
+        ysh[i] = s->c[i].vs < s->vmax;
+    }
+    /* At half size jd_idct4 reads only the top-left 4x4 (natural index
+     * row*8+col with row, col < 4, i.e. bits 0x24 clear); the rest are
+     * decoded to keep the bitstream in step but never stored. */
+    skip = s->bs == 4 ? 0x24 : 0;
+    memset(blk, 0, sizeof blk);
 
     if (rd) {
         if (s->restart) {
@@ -627,30 +727,40 @@ static se_err jd_run(const uint8_t *d, size_t len,
                 int bx, by;
                 for (by = 0; by < c->vs; by++)
                     for (bx = 0; bx < c->hs; bx++) {
-                        int t, k = 1, diff;
-                        memset(blk, 0, sizeof blk);
+                        int t, k = 1, diff, i;
                         t = jd_decode(&bits, &s->hdc[c->td]);
                         diff = jd_extend(jd_get(&bits, t), t);
                         c->dcpred += diff;
                         blk[0] = c->dcpred * s->qt[c->tq][0];
+                        nset = 0;
                         while (k < 64) {
                             int rs = jd_decode(&bits, &s->hac[c->ta]);
-                            int r = rs >> 4, sz = rs & 15;
+                            int r = rs >> 4, sz = rs & 15, z;
+                            uint32_t v;
                             if (!sz) { if (r != 15) break; k += 16; continue; }
                             k += r;
                             if (k > 63) break;
-                            blk[jd_zigzag[k]] =
-                                jd_extend(jd_get(&bits, sz), sz) *
-                                s->qt[c->tq][jd_zigzag[k]];
+                            z = jd_zigzag[k];
+                            v = jd_get(&bits, sz);  /* always consumed */
+                            if (!(z & skip)) {
+                                blk[z] = jd_extend(v, sz) * s->qt[c->tq][z];
+                                set[nset++] = (uint8_t)z;
+                            }
                             k++;
                         }
                         {
                             uint8_t *o = c->plane
                                 + (size_t)by * s->bs * c->pw
                                 + (size_t)(mx * c->hs + bx) * s->bs;
+                            /* not timed: a clock read per block cost more
+                             * than some of the transforms it measured */
                             if (s->bs == 8) jd_idct(blk, o, c->pw);
                             else            jd_idct4(blk, o, c->pw);
                         }
+                        /* Clear only what was written: a block holds ~20
+                         * coefficients, and a 256-byte memset per block was
+                         * ~107 MB of stores a frame on the camera. */
+                        for (i = 0; i < nset; i++) blk[set[i]] = 0;
                     }
             }
         }
@@ -671,18 +781,43 @@ static se_err jd_run(const uint8_t *d, size_t len,
                 const jd_comp *Y = &s->c[0], *Cb = &s->c[1], *Cr = &s->c[2];
                 const uint8_t *yy = Y->plane + (size_t)y * Y->pw;
                 const uint8_t *bb = Cb->plane +
-                    (size_t)(y * Cb->vs / s->vmax) * Cb->pw;
+                    (size_t)(y >> ysh[1]) * Cb->pw;
                 const uint8_t *rr = Cr->plane +
-                    (size_t)(y * Cr->vs / s->vmax) * Cr->pw;
-                int x;
-                for (x = 0; x < s->ow; x++) {
-                    int xb = x * Cb->hs / s->hmax;
-                    int xr = x * Cr->hs / s->hmax;
+                    (size_t)(y >> ysh[2]) * Cr->pw;
+                int x, xsb = xsh[1], xsr = xsh[2];
+                int lb = -1, lr = -1, cr_r = 0, cr_g = 0, cb_g = 0, cb_b = 0;
+                x = 0;
+                if (xsb && xsr) {
+                    /* 4:2:2 and 4:2:0, Canon's layouts: one chroma sample
+                     * per pixel pair, so the terms are worked out once a
+                     * pair without testing whether they changed */
+                    const uint8_t *cl = s->clamp + 384;
+                    for (; x + 1 < s->ow; x += 2) {
+                        int Cbv = bb[x >> 1] - 128, Crv = rr[x >> 1] - 128;
+                        int cr_r2 = 91881 * Crv, g2 = 22554 * Cbv + 46802 * Crv;
+                        int cb_b2 = 116130 * Cbv, k;
+                        uint8_t *op = orow + x * 3;
+                        for (k = 0; k < 2; k++, op += 3) {
+                            int Yv = yy[x + k] << 16;
+                            op[0] = cl[(Yv + cr_r2) >> 16];
+                            op[1] = cl[(Yv - g2) >> 16];
+                            op[2] = cl[(Yv + cb_b2) >> 16];
+                        }
+                    }
+                }
+                for (; x < s->ow; x++) {
+                    int xb = x >> xsb;
+                    int xr = x >> xsr;
                     int Yv  = yy[x] << 16;
-                    int Cbv = bb[xb] - 128, Crv = rr[xr] - 128;
-                    int r = (Yv + 91881 * Crv) >> 16;
-                    int g = (Yv - 22554 * Cbv - 46802 * Crv) >> 16;
-                    int b = (Yv + 116130 * Cbv) >> 16;
+                    int r, g, b;
+                    /* chroma terms once per chroma sample, not per pixel */
+                    if (xb != lb) { int Cbv = bb[xb] - 128; lb = xb;
+                                    cb_g = 22554 * Cbv; cb_b = 116130 * Cbv; }
+                    if (xr != lr) { int Crv = rr[xr] - 128; lr = xr;
+                                    cr_r = 91881 * Crv; cr_g = 46802 * Crv; }
+                    r = (Yv + cr_r) >> 16;
+                    g = (Yv - cb_g - cr_g) >> 16;
+                    b = (Yv + cb_b) >> 16;
                     orow[x * 3 + 0] = (uint8_t)(r < 0 ? 0 : r > 255 ? 255 : r);
                     orow[x * 3 + 1] = (uint8_t)(g < 0 ? 0 : g > 255 ? 255 : g);
                     orow[x * 3 + 2] = (uint8_t)(b < 0 ? 0 : b > 255 ? 255 : b);

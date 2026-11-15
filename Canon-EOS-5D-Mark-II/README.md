@@ -50,11 +50,12 @@ FILM/100CANON/FLM_1234.JPG    the same photo with the look on it
 | | |
 |:--|:--|
 | Module source | adapted from the 60D module, see [What changed from the 60D port](#-what-changed-from-the-60d-port) |
-| Builds against ML `5D2.212` | yes: `soup.mo` 103,332 bytes; all 84 functions it imports are exported by `5D2.212`; relocations only `R_ARM_ABS32` / `R_ARM_CALL` / `R_ARM_JUMP24`; no `%c` in its strings |
+| Builds against ML `5D2.212` | yes: `soup.mo` 106,500 bytes; all 84 functions it imports are exported by `5D2.212`; relocations only `R_ARM_ABS32` / `R_ARM_CALL` / `R_ARM_JUMP24`; no `%c` in its strings |
 | Loads on a 5D Mark II | yes, first try (2026-11-15): reads all 21 stocks, finds the CF card as `A:`. Nothing was developed then: Film was left OFF, and the card's folder was `108_FUJI`, which the module couldn't find (fixed since, see below) |
 | Finds the real DCIM folder | yes: `dcim_test.c` passes 16 checks, and on the camera the module found `A:/DCIM/108_FUJI` where Magic Lantern said `108EOS5D` |
 | Develops on a desktop | yes: the module's own `soup_dev.c` (`host_test.c`) on a synthetic 5616×3744 "Canon EOS 5D Mark II" CR2 gives a 2800×1872 film JPEG with Velvia, Portra, Acros and Soup 800; peak memory about 1.5 MB, nothing leaked |
 | Develops a frame on the camera | yes (2026-11-15): a JPEG L shot (5616×3744, 8.2 MB) became `FILM/108_FUJI/FLM_8661.JPG`, 2800×1872, 701 KB, Classic Chrome, in **68 s**, EXIF model and stock name correct. RAW and RAW+JPEG not tried yet |
+| Faster engine | the 7D port's decoder, encoder and look code (see below): byte-identical output on all 21 stocks, about 40% less CPU on a PC. Time on the camera not measured yet (was 68 s) |
 | Playback toggle (SET in playback) | **off**: needs the 5D2's playback addresses, see below |
 | Picker on the 4:3 screen | expected to work, about 11% narrower than drawn |
 
@@ -241,7 +242,8 @@ stay where they are. If the camera ever hangs, take the battery out.
 | `src/tools/build-5d2.sh` | builds and checks symbols against `platform/5D2.212`; builds only Magic Lantern's symbol list, not its whole zip, so `zip` isn't needed |
 | `card/ML/modules/soup.mo` | rebuilt for the 5D Mark II (the 60D build won't run on it) |
 | `doc/` | removed: those were 60D screenshots |
-| `src/engine/` | unchanged. It already knows the 5D Mark II's raw (white level and colour matrix in `cr2.c`) |
+| `src/engine/jpeg_dec.c`, `jpeg_enc.c`, `jpeg_enc.h`, `look.c` | taken from the [7D port](../Canon-EOS-7D) by @thebakers-club, whose speed work these are: a factored IDCT, skipping coefficients a half-size decode never uses, no library divides (the ARM946 has no divider), a colour memo and lookup tables in the look. Checked here before adopting: all 21 stocks on a real 5D Mark II JPEG and a synthetic 5D Mark II CR2 give byte-identical output to the 60D engine. `jpeg_enc.h` also gains an optional EXIF orientation, left at normal here |
+| `src/engine/` (the rest) | unchanged. It already knows the 5D Mark II's raw (white level and colour matrix in `cr2.c`) |
 
 <br>
 
@@ -264,7 +266,9 @@ sh src/tools/build-5d2.sh /path/to/magiclantern_simplified
 ([jiijii0](https://github.com/jiijii0/soup-engine)): the look, the film
 stocks, the engine and the picker are theirs. This port is adapted from
 the 60D port by [kookueh](https://github.com/kookueh), which grew out of
-the 50D port by [rebelt2i](https://github.com/rebelt2i).
+the 50D port by [rebelt2i](https://github.com/rebelt2i). The faster
+decoder, encoder and look code are from the 7D port by
+[thebakers-club](https://github.com/thebakers-club).
 
 The recipe stocks are based on recipes from
 [Fuji X Weekly](https://fujixweekly.com).
