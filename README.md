@@ -11,7 +11,7 @@
 <br>
 <br>
 
-`beta` &nbsp;·&nbsp; `GPL v2` &nbsp;·&nbsp; `8 cameras` &nbsp;·&nbsp; `Magic Lantern`
+`beta` &nbsp;·&nbsp; `GPL v2` &nbsp;·&nbsp; `9 cameras` &nbsp;·&nbsp; `Magic Lantern`
 
 </div>
 
@@ -62,6 +62,7 @@ instructions, and the download for that camera.
 |:--|:--|:--|:--|
 | 📷 | **[Canon EOS 5D Classic](Canon-EOS-5D)** | 1.1.1 | [@jiijii0](https://github.com/jiijii0) |
 | 🎞️ | **[Canon EOS 5D Classic, Half Frame](Canon-EOS-5D-Half-Frame)** | 1.1.1 | [@mmarco25](https://github.com/mmarco25) |
+| 📷 | **[Canon EOS 5D Mark II](Canon-EOS-5D-Mark-II)** | 2.1.2 | [@zulkiflifauzi](https://github.com/zulkiflifauzi) |
 | 📷 | **[Canon EOS 6D](Canon-EOS-6D)** (original, not Mark II) | 1.1.6 | [@lbrock3](https://github.com/lbrock3) |
 | 📷 | **[Canon EOS 7D](Canon-EOS-7D)** (original, not Mark II) | 2.0.3 | [@thebakers-club](https://github.com/thebakers-club) |
 | 📷 | **[Canon EOS 50D](Canon-EOS-50D)** | 1.0.9 | [@rebelt2i](https://github.com/rebelt2i) |
@@ -176,6 +177,7 @@ To everyone who ported it:
 [@GitariDev](https://github.com/GitariDev) (700D),
 [@thebakers-club](https://github.com/thebakers-club) (7D),
 [@mmarco25](https://github.com/mmarco25) (5D half frame),
+[@zulkiflifauzi](https://github.com/zulkiflifauzi) (5D Mark II),
 [@kookueh](https://github.com/kookueh) (60D) and
 [@lbrock3](https://github.com/lbrock3) (6D and 100D).
 

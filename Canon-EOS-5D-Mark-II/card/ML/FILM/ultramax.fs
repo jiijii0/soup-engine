@@ -1,0 +1,18 @@
+# EXPERIMENTAL. Kodak UltraMax 400: the drugstore roll. Warm and yellow,
+# saturated reds and yellows, slightly crunchy contrast, plenty of grain.
+VERSION   3
+NAME      ULTRAMAX 400
+DESC      EXPERIMENTAL - WARM YELLOWS, CONSUMER PUNCH
+WB        AS_SHOT
+CURVE     0,10 64,62 128,134 192,204 255,246
+CURVE_R   0,10 64,72 128,142 192,208 255,252
+CURVE_G   0,8 128,132 255,246
+CURVE_B   0,4 64,54 128,116 192,184 255,230
+SAT       110
+HUE_SAT   116,120,96,94,98,100
+HUE_ROT   6,-4,-6,0,-2,0
+HUE_LUM   100,106,98,98,94,100
+SPLIT_SH  8,4,-6
+SPLIT_HI  14,10,-12
+GRAIN     34
+GRAIN_SIZE 40

@@ -1,0 +1,417 @@
+<div align="center">
+
+# 🎞️ Soup Engine for the Canon EOS 5D Mark II <sub><sup>beta</sup></sub>
+
+### Film looks, in the camera, on a Canon EOS 5D Mark II.
+
+<br>
+
+`beta` &nbsp;·&nbsp; `GPL v2` &nbsp;·&nbsp; `36 film stocks` &nbsp;·&nbsp; `EOS 5D Mark II` &nbsp;·&nbsp; `firmware 2.1.2`
+
+A community port, adapted from the [60D port](../Canon-EOS-60D) by [@kookueh](https://github.com/kookueh).
+<br>[← All cameras](../README.md#-pick-your-camera)
+
+### 📦 [Download Canon-EOS-5D-Mark-II.zip](https://github.com/jiijii0/soup-engine/releases/download/folders/Canon-EOS-5D-Mark-II.zip)
+
+</div>
+
+<br>
+
+> 🚧 **Early.** This folder is the 60D module moved to the 5D Mark II.
+> It has developed its first frame on a 5D Mark II (one camera, one
+> owner, JPEG shooting), but it is far from tested. Don't use it on a
+> shoot you can't repeat. See [Status](#-status) below.
+
+<br>
+
+Press **SET**, pick a film, shoot. Every photo you take while Film is on
+gets a second JPEG with the look already on it, made in the camera
+shortly after the shot.
+
+```
+DCIM/100CANON/IMG_1234.CR2    your photo (RAW or JPEG), untouched
+FILM/100CANON/FLM_1234.JPG    the same photo with the look on it
+```
+
+> ⚖️ **No warranty.** Like all GPL software this comes with none. You
+> install it at your own risk. See sections 11 and 12 of the
+> [licence](LICENSE).
+
+> 🎨 **The looks are still being tweaked.** The names are shorthand for
+> the films and recipes they're based on, not exact copies. All
+> trademarks belong to their owners.
+
+<br>
+
+---
+
+<br>
+
+## 🚧 Status
+
+| | |
+|:--|:--|
+| Module source | adapted from the 60D module, see [What changed from the 60D port](#-what-changed-from-the-60d-port) |
+| Builds against ML `5D2.212` | yes: `soup.mo` 123,224 bytes (about 116 KB resident; the 115 KB build started on the camera with no Err 70); all 96 functions it imports are exported by `5D2.212`; relocations only `R_ARM_ABS32` / `R_ARM_CALL` / `R_ARM_JUMP24`; no `%c` in its strings |
+| Loads on a 5D Mark II | yes, first try (2026-11-15): reads all 21 stocks, finds the CF card as `A:`. Nothing was developed then: Film was left OFF, and the card's folder was `108_FUJI`, which the module couldn't find (fixed since, see below) |
+| Finds the real DCIM folder | yes: `dcim_test.c` passes 16 checks, and on the camera the module found `A:/DCIM/108_FUJI` where Magic Lantern said `108EOS5D` |
+| Develops on a desktop | yes: the module's own `soup_dev.c` (`host_test.c`) on a synthetic 5616×3744 "Canon EOS 5D Mark II" CR2 gives a 2800×1872 film JPEG with Velvia, Portra, Acros and Soup 800; peak memory about 1.5 MB, nothing leaked |
+| Develops a frame on the camera | yes (2026-11-15): a JPEG L shot (5616×3744, 8.2 MB) became `FILM/108_FUJI/FLM_8661.JPG`, 2800×1872, 701 KB, Classic Chrome, in **68 s**, EXIF model and stock name correct. RAW and RAW+JPEG not tried yet |
+| Faster engine | the 7D port's decoder, encoder and look code (see below): byte-identical output on all 21 stocks. On the camera: **45–46 s** a JPEG L frame, Classic Chrome (was 68 s) |
+| Card reads | the source is now read 256 KB at a time (34 card reads for a JPEG L, was about 1,000 of 8 KB), same bytes out. `SOUP.LOG` gives the card's share of each develop. On the camera, with an SD card in a CF adapter: read 0.7 s (40 reads), write 0.3–0.6 s. The card is about 1 s of a frame; the rest is the processor |
+| Develop older photos | yes: LAST 1 and LAST 5 with Replace existing OFF skipped every photo that had a film version (`1 skipped`, `5 skipped`, 0 s); Replace ON redid FLM_8672 in Superia 400 in 33 s and swapped it in. WHOLE FOLDER and holding off auto power-off through a long job not yet tried on the camera |
+| 36 films | yes: 15 added from the 7D and 6D ports; the camera lists all 36 (`36 stocks` in `SOUP.LOG`) and developed Ektar 100 at HALF and FULL |
+| Size FULL (5616×3744) | yes (2026-11-15): a JPEG L became a 5616×3744, quality 95, 7.8 MB film JPEG (Canon's own JPEG L of the frame: 10.2 MB) in **121 s**, Ektar 100. The frame before, at HALF: **42 s** |
+| RAW+JPEG source | yes: RAW + L was developed from the `.JPG` (41 s), RAW + S from the `.CR2` (32 s), both 2800×1872 |
+| Film-tinted thumbnails | yes: the camera's film files carry a 160×120 thumbnail in the film's look (before, they had none: Canon's thumbnail didn't fit the 8 KB EXIF block). Main image byte-for-byte unchanged (PC) |
+| Film sets ISO | yes: Tri-X 400 → 400, Portra 160 → 160, Portra 800 → 800, Vision3 250D → 250, Kodachrome 64 → 100; an ISO set by hand stays; OFF leaves ISO alone. The picker card used to show FILM SPEED 400 for Portra 160 (its own, older table); both now use `speed.h` |
+| Favourite films | yes: INFO marks and unmarks (`* NAME`), favourites come first and stay first after a restart |
+| Playback toggle (SET in playback) | yes: the address is built in (`0x16044`, firmware 2.1.2). With no `SE.PLY` on the card and nothing developed since power-on, SET showed FLM_8672, 8671 and 8670 in about 3 s each. It was learned on the camera in three presses (8672 → 8671 → 8670). 8 words held the newest number; only `0x16044` followed the photos, as a plain file number. SET then showed FLM_8670–8672 in about 3 s each. First tries had failed (the folder wasn't found yet after power-on, and 528 photos from another camera filled the list with look-alikes); it now starts from the newest photo's exact number |
+| Picker on the 4:3 screen | yes: drawn 8/9 as tall to undo the 4:3 panel's squeeze; looks right on the camera |
+
+<br>
+
+## ✨ About this port
+
+Everything the 60D port does, on the 5D Mark II:
+
+- **A Magic Lantern module.** It runs as `soup.mo` next to the official
+  Magic Lantern 5D Mark II build. Magic Lantern itself is not changed.
+- **The Soup Engine picker**, opened with SET on the shooting screen, with
+  the **DEVELOPING** and **DEVELOPED** pages.
+- **A small progress badge** on the shooting screen while frames develop.
+- **RAW, RAW+JPEG and JPEG-only.** From a CR2 it develops the full-size
+  JPEG Canon embeds in it (5616×3744), at half size: 2800×1872 (half is 2808 wide; the JPEG encoder trims to a multiple of 16).
+- **Or at full size**, 5616×3744 like Canon's JPEG L, at JPEG quality 95:
+  set **Size** to **FULL**. It takes about 2 minutes a frame.
+- **Only shots taken while Film is on are developed.** Photos already on
+  the card are left alone.
+- **Film files live outside DCIM**, so Canon's playback is never confused
+  by them.
+
+<br>
+
+## 📦 Installing
+
+#### 1️⃣ &nbsp; Install Magic Lantern
+
+You need a **Canon EOS 5D Mark II on firmware 2.1.2**, the only 5D Mark II
+firmware Magic Lantern supports. Install the official Magic Lantern build
+first, following their instructions:
+
+> ### 👉 [builds.magiclantern.fm/5D2.html](https://builds.magiclantern.fm/5D2.html)
+
+This port is built against `magiclantern.2025-06-20.5D2.212`, Magic
+Lantern commit `ed3e7c0`, the same commit as the 60D and 50D ports.
+
+#### 2️⃣ &nbsp; Get the module
+
+[`card/`](card) has a `soup.mo` built from this folder with Arm GCC
+13.2.1 (Ubuntu's `gcc-arm-none-eabi`) against Magic Lantern `ed3e7c0`. Or
+build it yourself from [`src/`](src) (see [`src/README.md`](src/README.md));
+the build writes it to `card/ML/modules/soup.mo`.
+
+#### 3️⃣ &nbsp; Copy the files to the card
+
+Camera off, card in your computer. Copy the `ML` folder from `card/` to
+the root of the CompactFlash card, merging it into the `ML` folder Magic
+Lantern put there.
+
+| file | what it is |
+|:--|:--|
+| ⚙️ `ML/modules/soup.mo` | the module |
+| ✅ `ML/SETTINGS/soup.en` | an empty file that tells Magic Lantern to load it |
+| 🎞️ `ML/FILM/` | `INDEX.TXT` and the 36 film stocks |
+
+The module creates the `FILM` folder at the top of the card itself, and
+keeps its settings in `ML/SE.CFG` and `ML/SE.NXT`.
+
+#### ✅ &nbsp; Check it
+
+Press **SET** on the shooting screen. The film picker should fill the
+back screen. If SET does nothing, check that **C.Fn IV-3 Assign SET
+button** is on **0: Normal (disabled)**, or open the picker from Magic
+Lantern's menu: **Shoot → Soup Film**, then SET.
+
+<br>
+
+## 📷 Using it
+
+| Where | Button | What it does |
+| --- | --- | --- |
+| Shooting screen | **SET** | open the film picker |
+| Picker | **main dial**, **Quick Control dial** or **joystick ◀ ▶** | browse the films |
+| Picker | **SET** | choose this film (also turns Film on) |
+| Picker | **INFO** | mark or unmark it as a favourite: favourites come first, marked `*` |
+| Picker | **Trash** or **MENU** | close |
+| Picker | **half-press** | close and shoot |
+
+The same settings are in the Magic Lantern menu under **Shoot → Soup
+Film** (press **Picture Style** on it to open them): Film on/off, Stock,
+**Size** and a Status line.
+
+| Size | film JPEG | quality | time a frame |
+|:--|:--|:--|:--|
+| **HALF** (default) | 2800×1872 | 88 | about 42–46 s |
+| **FULL** | 5616×3744, the size of Canon's JPEG L | 95 | about 2 minutes |
+
+FULL uses a bigger memory budget for the glow, so every stock looks the
+same as at HALF, only larger. Leave the camera on until the badge says
+**FILM DONE**, and expect files of 5–7 MB.
+
+While a frame develops, a badge at the top right of the shooting screen
+shows progress (**+2** means two more frames are waiting), then **FILM
+DONE** or **FILM FAILED** for a moment.
+
+### Film sets ISO
+
+With **Film sets ISO** ON (Shoot → Soup Film, OFF by default), loading a
+film sets the camera to its box speed, as loading a roll would: Tri-X 400
+at 400, Portra 160 at 160, Delta 3200 at 3200. The speed is the one on the
+film's card in the picker (**FILM SPEED**): the number in the film's name,
+or for names without one the speed the original picker gave it (Classic
+Chrome 200, Eterna 250). Velvia 50, Kodachrome 64 and Vintage Kodachrome
+10 get 100 (the 5D Mark II's lowest native ISO), 5D Classic (its card says
+**DIGITAL**) leaves ISO alone, and nothing goes past 6400. It happens only
+when you load a film, only in P, Tv, Av and M: an ISO you set afterwards
+stays. The menu line shows what the film shown would set.
+
+### RAW+JPEG
+
+Shooting RAW+JPEG, the film version is made from Canon's **JPEG L** when
+it is there (it is less compressed than the preview inside the CR2), and
+from the CR2 when the JPEG is M or S. Every film file also carries a
+small thumbnail in the film's look, so file browsers show the film
+version.
+
+### Seeing the film version in playback
+
+In **Play**, with a photo on screen, press **SET**: the film version
+appears (about 3 s), with `FILM   SET: ORIGINAL` at the top. **SET**
+again, or any other key, puts Canon's original back, as on the 60D.
+
+Canon keeps "the photo on screen" at `0x16044` on firmware 2.1.2, which
+this camera learned for itself (below) and the module now has built in.
+
+If that address ever reads as no photo at all, the camera learns again:
+
+1. press **Play**: it opens on your **newest** photo. **SET** there:
+   `FILM: LEARNING 1 - OLDER PHOTO, THEN SET`
+2. **◀** to the photo before it, **SET** again; then once more on the one
+   before that
+3. when it is sure: `FILM: LEARNED`, and the film version appears
+
+What it learns is kept in `ML/SE.PLY` and wins over the built-in address;
+delete that file to go back to it. If it says `COULDN'T LEARN`, send
+`ML/LOGS/SOUP.LOG`: every step is logged.
+
+### Developing older photos
+
+Photos already on the card can get a film version too: frames shot with
+Film off, from before the module was installed, or with a film you have
+since changed your mind about. In **Shoot → Soup Film** (press **Picture
+Style** on it):
+
+| setting | what it does |
+|:--|:--|
+| **Older photos** | `LAST 1`, `LAST 5`, `LAST 20`, or `WHOLE FOLDER`: the camera's current folder |
+| **Replace existing** | `OFF` (default) skips photos that already have a film version. `ON` develops them again with the film chosen now, and swaps the film file only once the new one is complete |
+| **Develop older** | **SET** starts, **SET** again stops. Shows `12 of 20`, then `done: ...` |
+
+It uses the **Stock** and **Size** chosen above, and works with Film on or
+off. New shots always go first: the job waits while a fresh frame
+develops. The badge shows progress as usual. Your photos are never
+changed, only `FILM/...` files are written. At HALF a frame takes about
+45 s, at FULL about 2 minutes, so `WHOLE FOLDER` can run for hours. The
+camera won't switch itself off while anything is developing.
+
+### What lands on the card
+
+| File | What it is |
+| --- | --- |
+| `DCIM/100CANON/IMG_1234.CR2` / `.JPG` | your photo, never changed |
+| `FILM/100CANON/FLM_1234.JPG` | the film version: 2800×1872 from a full-size shot at HALF, 5616×3744 at FULL; smaller shots give smaller files |
+| `ML/SE.CFG` | Film on/off, the chosen stock, Size and Film sets ISO |
+| `ML/SE.NXT` | where Soup got to, so it can catch up after a restart |
+| `ML/SE.FAV` | your favourite films, one name per line |
+| `ML/SE.PLY` | a playback address the camera learned (only if the built-in one ever fails) |
+| `ML/LOGS/SOUP.LOG` | one line per develop, with the stock used |
+
+Photo import apps that only look in `DCIM` won't pick up the film files,
+so copy the `FILM` folder across yourself.
+
+<br>
+
+## 🎞️ The films
+
+They're small text files in `ML/FILM` on the card, so you can read them,
+change them, or make your own with the
+[Soup Stocks](https://jiijii0.github.io/soup-stocks/) editor.
+
+Thirteen stocks come from Soup Engine. Fifteen come from other ports:
+twelve from the [7D port](../Canon-EOS-7D) (marked 🧪, which that port
+still labels experimental) and three from the [6D port](../Canon-EOS-6D)
+(marked 📷). Eight (marked 🍳) are the 60D port's recipes from [Fuji X Weekly](https://fujixweekly.com), translated
+into stocks by `recipe2fs.py`. These are approximations: Fujifilm doesn't
+publish what its settings do numerically, and here they run on a Canon
+JPEG.
+
+| Film | Look |
+| --- | --- |
+| Acros | black and white, black shadows, hard shoulder |
+| Astia | soft contrast, calm skin, clean slide blacks |
+| Bleach Bypass | silver retained, crushed blacks, near grey |
+| Classic Chrome | olive greens, cyan blues, dense muted mids |
+| Classic Neg | teal shadows, amber skin, olive foliage |
+| Eterna | flat cinema negative, green-cyan shadows |
+| Gold | gold highlights, dark blue shadows, warm mids |
+| Nostalgic Neg | amber light, dense violet blues, open shadows |
+| Portra | pastel, milky blacks, warm skin, muted foliage |
+| Provia | natural slide film, clean whites, real blacks |
+| Reala Ace | true colour, hard blacks, snappy shoulder |
+| Soup 800 | red halation, glowing blues, coarse grain |
+| Velvia | dense blue-greens, violet skies, black shadows |
+| 🍳 Reggie's Portra | warm soft Portra, kind skin, muted greens |
+| 🍳 Portra 400 v2 | golden-hour Portra, yellow-green lean |
+| 🍳 Kodachrome 64 | rich reds, deep skies, crisp slide contrast |
+| 🍳 Vintage Kodachrome | 1935–60 Kodachrome, bronze skin, cyan sky |
+| 🍳 Pacific Blues | beach negative, cyan sea, coarse grain |
+| 🍳 Reggie's Superia | moody Fujicolor negative, green tint, grainy |
+| 🍳 Vericolor III 160 | 80s portrait negative, soft and gentle |
+| 🍳 Tri-X 400 | gritty black and white, open mids, big grain |
+| 📷 5D Classic | early full-frame digital colour, warm and rosy |
+| 🧪 Ektachrome E100 | clean slide, cool blues |
+| 📷 Ektachrome | clean cool slide, clear blues, bright whites |
+| 🧪 Ektar 100 | vivid reds, deep blues |
+| 📷 Kodachrome | deep reds, gold warmth, olive greens |
+| 🧪 Portra 160 | soft skin, fine grain |
+| 🧪 Portra 800 | warm, richer, more grain |
+| 🧪 Pro 400H | pastel, mint greens, airy |
+| 🧪 Superia 400 | Fuji greens, teal shadows |
+| 🧪 Ultramax 400 | warm yellows, consumer punch |
+| 🧪 Vision3 250D | cine daylight, low contrast |
+| 🧪 Vision3 500T | cine night, cyan shadows |
+| 🧪 Delta 3200 | black and white, heavy grain |
+| 🧪 HP5 Plus | black and white, medium contrast |
+| 🧪 T-MAX 400 | black and white, smooth, fine grain |
+
+The picker lists films in the order of `ML/FILM/INDEX.TXT`, up to 48, so
+there is room for twelve of your own. Every file name must be 8.3
+(`mylook.fs`, not `my-new-look.fs`): the camera can't open longer ones.
+
+<br>
+
+## 🧹 Removing it
+
+Delete `ML/modules/soup.mo` and `ML/SETTINGS/soup.en`, or turn it off in
+Magic Lantern's **Modules** tab and restart. Your photos and film files
+stay where they are. If the camera ever hangs, take the battery out.
+
+<br>
+
+## ⚠️ Known limits
+
+- **Develop older works in the camera's current folder only** (the one
+  new shots go to). It lists that folder once when it starts. Frames are
+  found by number, so a photo renamed on a computer is not seen.
+- **FULL needs about 2–2.5 MB of memory** while a frame develops. It ran
+  fine on the first 5D Mark II it was tried on; if a camera can't spare
+  it, the frame fails cleanly and `ML/LOGS/SOUP.LOG` says how much memory
+  was free. Shooting while a FULL frame develops makes both slower, and
+  switching off mid-develop leaves the frame for the next start-up.
+- **Photos in a folder another camera made** (say `DCIM/108_FUJI` on a
+  card that was in a Fujifilm) are found: the module lists `DCIM` and
+  uses the folder with the current number that holds your latest shot.
+  The film files mirror its name, `FILM/108_FUJI/`. If a frame really
+  can't be found, `ML/LOGS/SOUP.LOG` says `nnnn: no CR2 or JPG in ...,
+  skipped`.
+- **Firmware 2.1.2 only**, because that's the only firmware Magic Lantern
+  supports on the 5D Mark II.
+- **The playback address was learned on one camera.** `0x16044` came from
+  a 5D Mark II on 2.1.2 learning it (the 60D's two addresses, found in
+  [qemu-eos](https://github.com/reticulatedpines/qemu-eos), don't apply).
+  The same firmware should keep it at the same place on every body, but
+  it hasn't been checked in qemu-eos. It reads memory only; a wrong photo
+  would show the wrong film version (any key puts Canon's picture back).
+  It is `SOUP_PLAY_FILE_212` in [`src/ml/5d2/soup.c`](src/ml/5d2/soup.c).
+- **The module is about 116 KB resident.** On the 7D port, growing past
+  about 119 KB risked Err 70 at start-up. The 115 KB build started fine on
+  a 5D Mark II; if a later one gives Err 70, go back to the previous
+  `soup.mo` and say so.
+- **SET in playback belongs to Soup** while the module is loaded, so Magic
+  Lantern's "SET + dial" playback shortcuts won't see it.
+- **The screen is 4:3.** The picker is drawn 8/9 as tall to keep its
+  proportions, so there is a band of paper above and below it.
+- **The picker doesn't open in Live View**, and nothing is developed while
+  Live View is set to movies.
+
+<br>
+
+## 🔁 What changed from the 60D port
+
+| where | change |
+|:--|:--|
+| `src/ml/60d/` → `src/ml/5d2/` | renamed |
+| `src/ml/5d2/soup.c` | playback-photo lookup gated on the 5D Mark II and firmware 2.1.2, with its two addresses left empty (the 60D's are never read); fallback drive `A:` for the CF card; sizes in comments |
+| `src/ml/5d2/soup.c`, `soup_dcim.h`, `dcim_test.c` | finds the DCIM folder really on the card instead of Magic Lantern's guess (number + `EOS5D`), so a folder another camera made, like `108_FUJI`, works; logs any frame it skips. Tested by `dcim_test.c` |
+| `src/ml/5d2/soup_dev.c`, `soup_port.h` | the source JPEG is read through a 256 KB read-ahead instead of a seek and read per 8 KB; each develop logs the time spent reading and writing the card |
+| `src/ml/5d2/soup.c`, `soup_dev.c`, `soup_dev.h`, `host_test.c` | Size HALF / FULL (saved in `ML/SE.CFG` as `SIZE`); FULL decodes at full scale, quality 95, with a 1 MB look budget so no stock's glow is cut, and 768 KB scratch for 4:2:0 previews; a develop that runs out of memory logs how much was free; the help line names Picture Style, the 5D2's submenu button |
+| `src/stocks/`, `card/ML/FILM/`, `src/tools/build-5d2.sh` | fifteen more films: twelve from the 7D port, three from the 6D port (`5dclassic`, `ektachrome`, `kodachrome`, shortened to 8.3 by the build). Each develops a real 5D Mark II JPEG L at HALF, and the heaviest at FULL, on a PC |
+| `src/ml/5d2/soup.c`, `soup_ui.h` | up to 48 films (was 32) |
+| `src/ml/5d2/soup.c`, `soup_dcim.h`, `dcim_test.c` | Develop older: a job (last 1/5/20 frames or every photo in the folder) run frame by frame when no new shot is waiting, with Replace existing; one shared develop function for new and older frames; ML's `powersave_prohibit()` held while anything develops, as the 7D does, so auto power-off can't cut a FULL develop short |
+| `src/ml/5d2/soup.c`, `soup_dev.c`, `host_test.c` | RAW+JPEG develops the JPEG L when it is at least the CR2 preview's size (`host_test --pick`); the film file's EXIF thumbnail is the source's thumbnail through the film's look, after the 7D port's `graded_thumb` |
+| `src/ml/5d2/soup.c`, `soup_iso.h` | Film sets ISO, after the 6D port: box speed from the film name or a table, clamped to 100–6400, set only on loading a film, P/Tv/Av/M only |
+| `src/engine/speed.h`, `ui.c` | one box-speed table for the picker card's FILM SPEED band and Film sets ISO: the card used to show 400 for Portra 160 and 800, and 200 for most of the added films. 5D Classic's card says DIGITAL |
+| `src/ml/5d2/soup.c`, `soup_ui.c` | favourite films first (INFO in the picker, `ML/SE.FAV`); playback toggle at `0x16044`, learned on the camera and built in (relearned into `ML/SE.PLY` only if it fails); the picker drawn 8/9 as tall for the 4:3 panel |
+| `src/ml/5d2/soup_ui.c` | the playback log line no longer reads the 60D's addresses; notes on SET (C.Fn IV-3) and the 4:3 screen |
+| `src/ml/5d2/soup_dev.c` | EXIF model fallback is `Canon EOS 5D Mark II` |
+| `src/ml/5d2/ML-PIN.txt`, `Makefile`, `README.rst` | 5D2.212 |
+| `src/tools/build-5d2.sh` | builds and checks symbols against `platform/5D2.212`; builds only Magic Lantern's symbol list, not its whole zip, so `zip` isn't needed |
+| `card/ML/modules/soup.mo` | rebuilt for the 5D Mark II (the 60D build won't run on it) |
+| `doc/` | removed: those were 60D screenshots |
+| `src/engine/jpeg_dec.c`, `jpeg_enc.c`, `jpeg_enc.h`, `look.c` | taken from the [7D port](../Canon-EOS-7D) by @thebakers-club, whose speed work these are: a factored IDCT, skipping coefficients a half-size decode never uses, no library divides (the ARM946 has no divider), a colour memo and lookup tables in the look. Checked here before adopting: all 21 stocks on a real 5D Mark II JPEG and a synthetic 5D Mark II CR2 give byte-identical output to the 60D engine. `jpeg_enc.h` also gains an optional EXIF orientation, left at normal here |
+| `src/engine/` (the rest) | unchanged. It already knows the 5D Mark II's raw (white level and colour matrix in `cr2.c`) |
+
+<br>
+
+## 🛠️ Building from source
+
+Everything is in [`src/`](src): the module in [`src/ml/5d2/`](src/ml/5d2),
+this port's copy of the engine in [`src/engine/`](src/engine), the stocks,
+the recipes and the tools. [`src/README.md`](src/README.md) has the build
+steps. In short, with Magic Lantern checked out at `ed3e7c0`:
+
+```sh
+sh src/tools/build-5d2.sh /path/to/magiclantern_simplified
+```
+
+<br>
+
+## ❤️ Thanks
+
+**Soup Engine** is the work of **luigi manga**
+([jiijii0](https://github.com/jiijii0/soup-engine)): the look, the film
+stocks, the engine and the picker are theirs. This port is adapted from
+the 60D port by [kookueh](https://github.com/kookueh), which grew out of
+the 50D port by [rebelt2i](https://github.com/rebelt2i). The faster
+decoder, encoder and look code are from the 7D port by
+[thebakers-club](https://github.com/thebakers-club).
+
+The recipe stocks are based on recipes from
+[Fuji X Weekly](https://fujixweekly.com).
+
+This wouldn't exist without [Magic Lantern](https://magiclantern.fm).
+Soup Engine runs inside their work, and years of their reverse
+engineering made it possible to understand. They're worth supporting.
+
+Soup Engine isn't Magic Lantern's project, so please don't take problems
+with it to them. Open an issue here instead, and say which camera you're
+using.
+
+<br>
+
+## 📄 Source and licence
+
+GPL v2, same as Soup Engine. See [LICENSE](LICENSE) in this folder.
+Distributed **without any warranty**, including the implied warranties of
+merchantability and fitness for a particular purpose (sections 11 and 12).

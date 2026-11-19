@@ -1,0 +1,18 @@
+# EXPERIMENTAL. Kodak Portra 160: Portra's daylight portrait sibling. Softer
+# contrast and finer grain than 400, colour a touch more neutral.
+VERSION   3
+NAME      PORTRA 160
+DESC      EXPERIMENTAL - SOFT SKIN, FINE GRAIN
+WB        AS_SHOT
+CURVE     0,20 64,80 128,136 192,192 255,238
+CURVE_R   0,12 64,84 128,140 192,200 255,248
+CURVE_G   0,10 128,129 255,244
+CURVE_B   0,10 64,68 128,126 192,188 255,240
+SAT       84
+HUE_SAT   96,108,82,98,100,98
+HUE_ROT   6,3,-10,-4,-3,-3
+HUE_LUM   104,106,95,98,97,102
+SPLIT_SH  10,5,-2
+SPLIT_HI  10,7,-5
+GRAIN     10
+GRAIN_SIZE 22
