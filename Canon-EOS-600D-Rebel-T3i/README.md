@@ -1,7 +1,9 @@
 # Soup Engine — Canon EOS 600D / Rebel T3i (Firmware 1.0.2)
 
 Best shot at a 600D port adapted from the 60D version. 
+
 !!Full transparency!!: this was vibe-coded with Claude. 
+
 I don't own any of the other supported cameras to compare how they behave, so this has only been tested on my own 600D running firmware **1.0.2** — everything works on hardware.
 
 ## How to Install
